@@ -1,0 +1,29 @@
+[project]
+name = "flowlab"
+version = "0.1.0"
+description = "FlowLab - 流量异常检测研究/实验工作台"
+requires-python = ">=3.11"
+dependencies = [
+  "pandas>=2.2",
+  "numpy>=1.26",
+  "scikit-learn>=1.5",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.8"]
+api = ["fastapi>=0.115", "uvicorn>=0.32"]
+
+[project.scripts]
+flowlab = "flowlab.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flowlab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
