@@ -35,7 +35,7 @@ META_COLUMNS = {"flow_id", "src_ip", "dst_ip", "src_port", "timestamp", "label"}
 def normalize_name(name: str) -> str:
     """小写、去空白、连字符/点转下划线、压缩重复下划线。"""
     s = str(name).strip().lower()
-    s = re.sub(r"[\s\-\.]+", "_", s)
+    s = re.sub(r"\W+", "_", s)          # 空白、连字符、斜杠、括号一律变下划线
     s = re.sub(r"_+", "_", s).strip("_")
     return s
 

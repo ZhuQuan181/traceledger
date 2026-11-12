@@ -3,9 +3,61 @@
 > 工作名（占位，可改）。一句话：**把网络流量异常检测的研究模型，变成能跑、能复现、能解释的系统。**
 
 - 创建：2026-11-11
-- 状态：需求定义阶段（未写代码）
-- 负责人：zq
+- 状态：**M1 完成**（2026-11-13，代码可跑：CLI + API + Web 界面 + 30 个测试）
+- 负责人：zq（实现由 Hermes 完成）
 - 文档语言：中文；代码与接口用英文
+
+## 快速开始
+
+```bash
+cd /mnt/data/flowlab
+uv sync --extra dev --extra api
+
+uv run flowlab demo                        # 合成数据跑一次
+uv run flowlab demo --report out/report.md # 同时生成报告
+uv run flowlab run my.csv --split temporal # 跑自己的 CSV（需要 label 列）
+uv run flowlab score cap.pcap --top 20     # pcap 只打分（无标签）
+uv run flowlab serve                       # Web 界面 127.0.0.1:8765
+cd web && npm install && npm run build     # 改前端后重新构建
+```
+
+pcap 需要本机 `tshark`（Ubuntu: `sudo apt install tshark`）。
+
+## 命令
+
+| 命令 | 作用 |
+|---|---|
+| `flowlab demo` | 合成数据跑全流程（默认 5000 正常 + 500 攻击） |
+| `flowlab run FILE` | 对 CSV/pcap 跑实验，要求有 `label` 列 |
+| `flowlab score FILE` | 无标签数据的无监督排序，输出最可疑的流 |
+| `flowlab serve` | 本地 Web 工作台 |
+| `flowlab models` | 列出已注册模型 |
+
+通用参数：`--models mlp,iforest`、`--split temporal|random`、`--seed`、`--json`、`--report PATH`。
+
+## 架构
+
+```
+CSV / pcap
+   ↓ ingest        列名标准化、分隔符/编码嗅探、五元组聚合
+   ↓ features      泄漏检测 → 训练/测试分离的预处理
+   ↓ models        registry 插件（mlp / iforest / autoencoder / 你的）
+   ↓ eval          时间/随机切分 → AUC·F1·FPR·混淆矩阵
+   ↓ report/api    Markdown 报告 + FastAPI + React 界面
+```
+
+新增模型只要一个文件，放进 `src/flowlab/models/` 就会被自动发现：
+
+```python
+from flowlab.models.base import Detector
+from flowlab.models.registry import register
+
+@register("your_model")
+class YourDetector(Detector):
+    kind = "supervised"
+    def fit(self, X, y): ...
+    def score(self, X): ...   # 返回 [0,1]，越大越可疑
+```
 
 ## 这个项目要解决什么
 

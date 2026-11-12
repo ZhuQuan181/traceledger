@@ -136,4 +136,5 @@ def read_pcap(path: str | Path, flow_timeout: float = 120.0) -> pd.DataFrame:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"文件不存在: {p}")
-    return flows_from_packets(parse_tshark_output(_run_tshark(p)), flow_timeout=flow_timeout)
+    from flowlab.schema import normalize_columns
+    return normalize_columns(flows_from_packets(parse_tshark_output(_run_tshark(p)), flow_timeout=flow_timeout))

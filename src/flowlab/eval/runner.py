@@ -37,6 +37,8 @@ class EvalResult:
     n_train: int = 0
     n_test: int = 0
     threshold: float = 0.5
+    top_flows: list[dict] = field(default_factory=list)
+    score_curve: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -45,7 +47,8 @@ class EvalResult:
 def run_experiment(df: pd.DataFrame, models: list[str] | None = None,
                    split: str = "temporal", test_size: float = 0.3,
                    seed: int = 42, threshold: float = 0.5,
-                   label_col: str = "label") -> tuple[list[EvalResult], list[dict]]:
+                   label_col: str = "label", explain: bool = False,
+                   top_k: int = 20) -> tuple[list[EvalResult], list[dict]]:
     models = models or ["mlp", "iforest", "autoencoder"]
     warns = detect(df, split=split, label_col=label_col)
     dh = dataset_hash(df)
@@ -68,6 +71,31 @@ def run_experiment(df: pd.DataFrame, models: list[str] | None = None,
         scores = det.score(prep_te.X)
         metrics = compute_metrics(prep_te.y, scores, threshold=threshold)
         cm = confusion_matrix(prep_te.y, (scores >= threshold).astype(int), labels=[0, 1]).ravel()
+
+        top_flows: list[dict] = []
+        score_curve: list[dict] = []
+        if explain:
+            te = df.loc[test_idx].copy()
+            te["score"] = scores
+            cols = [c for c in ("src_ip", "dst_ip", "dst_port", "protocol", "timestamp",
+                                "bytes_per_s", "packets_per_s", "fwd_packets", label_col)
+                    if c in te.columns]
+            top = te.sort_values("score", ascending=False).head(top_k)
+            import numpy as _np
+            arr = _np.asarray(scores, dtype=float)
+            buckets = _np.array_split(arr, min(200, max(20, len(arr) // 5)))
+            # p = 该时间窗内的最高分（用来定高度），h = 超过阈值的比例（用来定红色浓度）
+            score_curve = [
+                {"p": round(float(_np.max(b)), 3), "h": round(float((b >= threshold).mean()), 3)}
+                if len(b) else {"p": 0.0, "h": 0.0}
+                for b in buckets
+            ]
+
+            top_flows = [
+                {**{k: (None if pd.isna(v) else v) for k, v in row.items()},
+                 "score": round(float(row["score"]), 4)}
+                for row in top[cols + ["score"]].to_dict("records")
+            ]
         results.append(
             EvalResult(
                 model=name, kind=det.kind, metrics=metrics,
@@ -75,6 +103,7 @@ def run_experiment(df: pd.DataFrame, models: list[str] | None = None,
                 duration_s=round(time.perf_counter() - t0, 3),
                 params=det.info().get("params", {}), split=split, dataset_hash=dh,
                 n_train=int(len(prep_tr.X)), n_test=int(len(prep_te.X)), threshold=threshold,
+                top_flows=top_flows, score_curve=score_curve,
             )
         )
     return results, warns

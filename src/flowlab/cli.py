@@ -39,6 +39,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--top", type=int, default=20)
     s.add_argument("--json", action="store_true")
 
+    sv = sub.add_parser("serve", help="启动本地 Web 界面")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8765)
+
     sub.add_parser("models", help="列出已注册模型")
     return p
 
@@ -79,6 +83,13 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(available()))
         return 0
 
+    if args.cmd == "serve":
+        import uvicorn
+        from flowlab.api.main import app
+        print(f"FlowLab 已启动: http://{args.host}:{args.port}")
+        uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+        return 0
+
     if args.cmd == "score":
         from flowlab.features.prepare import build_feature_matrix
         from flowlab.models.registry import create
@@ -90,9 +101,10 @@ def main(argv: list[str] | None = None) -> int:
         det = create(args.model)
         det.fit(X, None)
         scores = det.score(X)
-        view = feats.copy()
+        view = df.copy()
         view["score"] = scores
-        show = [c for c in ("src_ip", "dst_ip", "dst_port", "protocol", "bytes_per_s", "packets_per_s") if c in view.columns]
+        show = [c for c in ("src_ip", "dst_ip", "dst_port", "protocol", "timestamp",
+                            "bytes_per_s", "packets_per_s") if c in view.columns]
         top = view.sort_values("score", ascending=False).head(args.top)
         if args.json:
             import json
