@@ -61,6 +61,8 @@ export type Dataset = {
   labels?: { mode?: string; labelled?: number; total?: number; file?: string };
   engineering?: { min_duration_ms?: number; derived?: string[]; note?: string };
   format?: { format?: string; shape?: string; note?: string; pickle_object?: string };
+  classes?: { label: string; count: number }[];
+  features?: { used: string[]; encoded: number };
 };
 
 export type Ablation = {

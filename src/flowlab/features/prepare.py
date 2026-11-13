@@ -26,6 +26,7 @@ class Prepared:
     feature_names: list[str]
     pipeline: ColumnTransformer
     raw: pd.DataFrame = field(repr=False, default=None)
+    raw_features: list[str] = field(default_factory=list)
 
 
 def _label_to_binary(labels: pd.Series) -> np.ndarray:
@@ -77,7 +78,7 @@ def build_matrix(df: pd.DataFrame, label_col: str = "label",
     ct = _make_preprocessor(feats)
     X = np.asarray(ct.fit_transform(feats), dtype=float)
     return Prepared(X, _label_to_binary(df[label_col]),
-                    list(ct.get_feature_names_out()), ct, feats)
+                    list(ct.get_feature_names_out()), ct, feats, list(feats.columns))
 
 
 def build_matrix_pair(train_df: pd.DataFrame, test_df: pd.DataFrame,
@@ -94,9 +95,10 @@ def build_matrix_pair(train_df: pd.DataFrame, test_df: pd.DataFrame,
     Xtr = np.asarray(ct.fit_transform(feats_tr), dtype=float)
     Xte = np.asarray(ct.transform(feats_te), dtype=float)
     names = list(ct.get_feature_names_out())
+    raw_features = list(feats_tr.columns)
     return (
-        Prepared(Xtr, _label_to_binary(train_df[label_col]), names, ct, feats_tr),
-        Prepared(Xte, _label_to_binary(test_df[label_col]), names, ct, feats_te),
+        Prepared(Xtr, _label_to_binary(train_df[label_col]), names, ct, feats_tr, raw_features),
+        Prepared(Xte, _label_to_binary(test_df[label_col]), names, ct, feats_te, raw_features),
     )
 
 

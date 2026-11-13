@@ -69,6 +69,9 @@ class ReportView:
     ablation: dict | None
     small_test: bool
     leak_count: int
+    classes: list[dict] = field(default_factory=list)
+    features: list[str] = field(default_factory=list)
+    encoded_features: int = 0
 
     @property
     def top_warning(self) -> dict | None:
@@ -139,4 +142,7 @@ def build_view(results: list[EvalResult], warns: list[dict], meta: dict,
         ablation=ablation,
         small_test=bool(r0 and r0.n_test < 50),
         leak_count=len(warns),
+        classes=meta.get("classes") or [],
+        features=(meta.get("features") or {}).get("used") or [],
+        encoded_features=(meta.get("features") or {}).get("encoded") or 0,
     )

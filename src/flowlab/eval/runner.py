@@ -41,6 +41,8 @@ class EvalResult:
     score_curve: list[dict] = field(default_factory=list)
     seed: int = 42
     attack_train: int = 0
+    features: list[str] = field(default_factory=list)
+    encoded_features: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -107,6 +109,8 @@ def run_experiment(df: pd.DataFrame, models: list[str] | None = None,
                 n_train=int(len(prep_tr.X)), n_test=int(len(prep_te.X)), threshold=threshold,
                 top_flows=top_flows, score_curve=score_curve,
                 seed=seed, attack_train=int((prep_tr.y == 1).sum()),
+                features=list(prep_tr.raw_features),
+                encoded_features=len(prep_tr.feature_names),
             )
         )
     return results, warns

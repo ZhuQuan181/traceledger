@@ -8,9 +8,22 @@ from flowlab.report.html import render_html
 from flowlab.report.markdown import render_report
 
 
+def class_distribution(df: pd.DataFrame, label_col: str = "label", top: int = 8) -> list[dict]:
+    """标签分布（按数量降序，超出 top 的合并为「其他」）。"""
+    if label_col not in df.columns:
+        return []
+    counts = df[label_col].astype(str).str.strip().value_counts(dropna=False)
+    rows = [{"label": str(k), "count": int(v)} for k, v in counts.head(top).items()]
+    rest = int(counts.iloc[top:].sum()) if len(counts) > top else 0
+    if rest:
+        rows.append({"label": "其他", "count": rest})
+    return rows
+
+
 def build_payload(df: pd.DataFrame, results: list[EvalResult], warns: list[dict],
                   source: str, meta: dict | None = None,
-                  ablation: dict | None = None) -> dict:
+                  ablation: dict | None = None,
+                  label_col: str = "label") -> dict:
     meta = dict(meta or {})
     r0 = results[0] if results else None
     best = max(results, key=lambda r: (r.metrics.get("auc") or 0)) if results else None
@@ -28,9 +41,16 @@ def build_payload(df: pd.DataFrame, results: list[EvalResult], warns: list[dict]
         "attack_test": r0.metrics.get("attack_support", 0) if r0 else 0,
         "labels": meta.get("labels", {}),
         "engineering": meta.get("engineering", {}),
+        "format": meta.get("format", {}),
+        "classes": class_distribution(df, label_col),
+        "features": {
+            "used": results[0].features if results else [],
+            "encoded": results[0].encoded_features if results else 0,
+        },
     }
     report_meta = {"source": source, "rows": len(df), "labels": dataset["labels"],
-                   "engineering": dataset["engineering"],
+                   "engineering": dataset["engineering"], "format": dataset["format"],
+                   "classes": dataset["classes"], "features": dataset["features"],
                    "attack_support": dataset["attack_test"]}
     return {
         "dataset": dataset,

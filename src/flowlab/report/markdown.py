@@ -22,6 +22,21 @@ def _meta_table(v: ReportView) -> str:
     return "| 项 | 值 |\n|---|---|\n" + "\n".join(f"| {k} | {val} |" for k, val in rows)
 
 
+def _classes_line(v: ReportView) -> str:
+    if not v.classes:
+        return ""
+    parts = [f"{c['label']} {c['count']:,}" for c in v.classes]
+    return "\n**类别分布**：" + " · ".join(parts) + "\n"
+
+
+def _features_line(v: ReportView) -> str:
+    if not v.features:
+        return ""
+    shown = ", ".join(f"`{f}`" for f in v.features)
+    return (f"\n**参与训练的特征**：{len(v.features)} 列（编码后 {v.encoded_features} 维）\n\n"
+            f"{shown}\n")
+
+
 def _warn_table(warns: list[dict]) -> str:
     if not warns:
         return "未检测到明显的数据泄漏。\n"
@@ -63,7 +78,7 @@ def render_report(results: list[EvalResult], warns: list[dict], meta: dict,
     lines = [
         "# 流量异常检测实验报告", "",
         f"- 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", "",
-        "## 1. 数据与配置", "", _meta_table(v), "",
+        "## 1. 数据与配置", "", _meta_table(v), "", _classes_line(v), _features_line(v),
         "## 2. 数据泄漏检查", "", _warn_table(v.warnings),
         "## 3. 模型对比", "", _model_table(v), "",
         "## 4. 混淆矩阵", "",

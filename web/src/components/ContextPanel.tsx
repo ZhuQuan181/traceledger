@@ -25,6 +25,32 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
         )}
       </section>
 
+      {d?.classes?.length ? (
+        <section>
+          <h2>数据构成</h2>
+          <div className="dist">
+            {d.classes.map((c) => {
+              const total = d.classes!.reduce((s, x) => s + x.count, 0) || 1;
+              return (
+                <div className="dist-row" key={c.label}>
+                  <span className="dist-label" title={c.label}>{c.label}</span>
+                  <span className="dist-bar"><i style={{ width: `${Math.max(2, (c.count / total) * 100)}%` }} /></span>
+                  <span className="dist-count mono">{c.count.toLocaleString()}</span>
+                </div>
+              );
+            })}
+          </div>
+          {d.features?.used?.length ? (
+            <details className="feat-details">
+              <summary>{d.features.used.length} 列参与训练 · 编码后 {d.features.encoded} 维</summary>
+              <p className="feat-chips">
+                {d.features.used.map((f) => <code key={f}>{f}</code>)}
+              </p>
+            </details>
+          ) : null}
+        </section>
+      ) : null}
+
       {d && (
         <section>
           <h2>实验信息</h2>

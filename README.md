@@ -22,6 +22,9 @@ uv run flowlab run feats.npz              # npy / npz / parquet / json / jsonl /
 uv run flowlab run model_input.pkl --allow-pickle   # pickle 需显式许可
 uv run flowlab score cap.pcap --top 20     # pcap 只打分（无标签）
 uv run flowlab serve                       # Web 界面 127.0.0.1:8765
+
+uv run python scripts/check_dataset.py data.csv        # 训练前体检：类别/缺失/inf/重复
+uv run python scripts/bench_scale.py --rows 690000     # 规模基准（解析/特征/训练耗时）
 cd web && npm install && npm run build     # 改前端后重新构建
 ```
 
@@ -55,7 +58,7 @@ CSV / pcap
    ↓ features      泄漏检测 → 训练/测试分离的预处理
    ↓ models        registry 插件（mlp / iforest / autoencoder / 你的）
    ↓ eval          时间/随机切分 → AUC·F1·FPR·混淆矩阵
-   ↓ report/api    Markdown / 单文件 HTML 报告 + FastAPI + React 界面
+   ↓ report/api    报告含：指纹、种子、特征清单、类别分布、混淆矩阵
   ↓ store         SQLite 实验历史（本地，不上传）
 ```
 

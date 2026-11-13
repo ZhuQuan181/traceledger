@@ -69,6 +69,9 @@ border-bottom:1px solid var(--rule);border-left:2px solid var(--rule2)}
 .leak .sev{display:block;margin-top:4px;font-size:10.5px;color:var(--muted)}
 .leak p{margin:0 0 4px;font-size:13px}
 .leak .fix{font-size:12px;color:var(--muted)}
+.feat-list{margin:12px 0 0;display:flex;flex-wrap:wrap;gap:6px}
+.feat{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink2);
+background:#f1efe9;padding:2px 6px;border-radius:2px}
 .foot{margin-top:44px;padding-top:14px;border-top:1px solid var(--rule);font-size:11.5px;color:var(--muted)}
 @media print{body{background:#fff;padding:0}.wrap{max-width:none}}
 """
@@ -165,8 +168,11 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
         ("判定阈值", v.threshold),
         ("标签对齐", f"{_e(v.labels_mode)}（{v.labels_labelled}/{v.labels_total}）"),
         ("速率兜底", f"{v.min_duration_ms} ms"),
+        ("类别分布", " · ".join(f"{c['label']} {c['count']:,}" for c in v.classes) or "—"),
+        ("训练特征", f"{len(v.features)} 列（编码后 {v.encoded_features} 维）"),
         ("生成时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
     ])
+    feature_chips = "".join(f'<code class="feat">{_e(f)}</code>' for f in v.features)
 
     risk = (
         f'<div class="risk"><span class="tag">{v.leak_count} 条泄漏</span>'
@@ -223,6 +229,7 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
 
 <h2><span class="idx">{int(five) + 1:02d}</span>实验配置</h2>
 <table class="data">{meta_rows}</table>
+<p class="feat-list">{feature_chips}</p>
 
 <p class="foot">复现：<span class="mono">uv run flowlab demo --split {_e(v.split)} --seed {v.seed} --models {_e(','.join(m.model for m in v.models))}</span><br>
 同一数据指纹 + 同样的切分与随机种子，结果应逐位一致（浮点误差除外）。本文件自包含，可离线归档。</p>
