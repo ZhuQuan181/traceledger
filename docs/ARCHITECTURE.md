@@ -43,6 +43,7 @@
 | `ingest/csv.py` | 分隔符嗅探、编码回退 | 列名语义（交给 schema） |
 | `ingest/pcap.py` | tshark 导字段、五元组聚合成流 | 标签（交给 labels） |
 | `ingest/table.py` | json/jsonl/parquet/npy/npz/pkl/excel 读取 | 形状识别（交给 adapters） |
+| `ingest/zeek.py` | Zeek conn.log 表头解析 + 字段映射 | 标签（交给 labels） |
 | `adapters/shapes.py` | 任意结构 → DataFrame + 说明 | 判断数据是否合理 |
 | `labels.py` | 旁挂标签对齐（flow_id / 五元组 / 行序） | 标签语义解释 |
 | `schema.py` | 列名标准化、BENIGN 同义词 | 特征选择 |

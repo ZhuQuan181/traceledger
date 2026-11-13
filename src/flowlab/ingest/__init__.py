@@ -18,6 +18,9 @@ def read_any(path: str | Path, allow_pickle: bool = False) -> tuple[object, dict
     if p.suffix.lower() in PCAP_SUFFIXES:
         from flowlab.ingest.pcap import read_pcap
         return read_pcap(p), {"format": "pcap", "shape": "flows", "note": "tshark 解析后按五元组聚合"}
+    from flowlab.ingest.zeek import looks_like_zeek, read_zeek
+    if looks_like_zeek(p):
+        return read_zeek(p)
     try:
         return read_table(p, allow_pickle=allow_pickle)
     except ShapeError:
@@ -27,8 +30,8 @@ def read_any(path: str | Path, allow_pickle: bool = False) -> tuple[object, dict
 
 
 def supported_formats() -> list[str]:
-    return ["csv", "tsv", "pcap", "pcapng", "json", "jsonl", "parquet",
-            "npy", "npz", "pkl", "pickle", "xlsx", "xls"]
+    return ["csv", "tsv", "pcap", "pcapng", "zeek conn.log", "json", "jsonl",
+            "parquet", "npy", "npz", "pkl", "pickle", "xlsx", "xls"]
 
 
 __all__ = ["read_any", "read_csv", "read_table", "supported_formats"]

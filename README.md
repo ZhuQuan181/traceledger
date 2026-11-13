@@ -31,13 +31,14 @@ cd web && npm install && npm run build     # 改前端后重新构建
 ```
 
 pcap 需要本机 `tshark`（Ubuntu: `sudo apt install tshark`）。
+Zeek `conn.log` 可直接读（`.log` / `.log.gz`），标签用 `--labels` 旁挂。
 
 ## 命令
 
 | 命令 | 作用 |
 |---|---|
 | `flowlab demo` | 合成数据跑全流程（默认 5000 正常 + 500 攻击） |
-| `flowlab run FILE` | 对 CSV/pcap 跑实验，要求有 `label` 列 |
+| `flowlab run FILE` | 对 CSV / pcap / Zeek conn.log 跑实验，要求有 `label` 列 |
 | `flowlab score FILE` | 无标签数据的无监督排序，输出最可疑的流 |
 | `flowlab run FILE --labels L` | pcap 旁挂标签（flow_id / 五元组 / 行序三种对齐） |
 | `flowlab serve` | 本地 Web 工作台 |
