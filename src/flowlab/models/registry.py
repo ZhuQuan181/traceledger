@@ -26,8 +26,11 @@ def _discover() -> None:
         return
     pkg = importlib.import_module("flowlab.models")
     for m in pkgutil.iter_modules(pkg.__path__):
-        if m.name not in {"base", "registry"}:
-            importlib.import_module(f"flowlab.models.{m.name}")
+        # 跳过骨架与模板：下划线开头约定为"不自动加载"，
+        # 否则 _template.py 会把 my_model 塞进模型列表
+        if m.name in {"base", "registry"} or m.name.startswith("_"):
+            continue
+        importlib.import_module(f"flowlab.models.{m.name}")
     _discovered = True
 
 

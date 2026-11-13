@@ -80,9 +80,12 @@ export type Verdict = {
   checks: VerdictCheck[];
 };
 
+export type ChecklistItem = { item: string; ok: boolean; detail: string };
+
 export type Payload = {
   dataset: Dataset;
   verdict?: Verdict;
+  checklist?: ChecklistItem[];
   warnings: Warning[];
   results: Result[];
   best_model: string | null;

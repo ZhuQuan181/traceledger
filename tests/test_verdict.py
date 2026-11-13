@@ -79,14 +79,35 @@ def test_ablation_heavy_drop_is_lead_reason():
 
 
 def test_port_leak_escalates_with_perfect_auc():
-    """端口泄漏 + 满分 AUC：泄漏行必须升级为 fail，不能与指标可信度自相矛盾。"""
+    """端口泄漏 + 满分 AUC，且没做过消融：必须升级为 fail。"""
     warns = [_leak("port_leak", ["dst_port"])]
     v = judge({"auc": 1.0, "fpr": 0.0, "recall": 1.0}, warns, n_test=2000,
-              ablation={"column": "dst_port", "rows": [{"delta": 0.0}]},
               used_features=["dst_port"])
     leak = next(c for c in v.checks if c["name"] == "数据泄漏")
     assert leak["status"] == "fail"
     assert v.level == "fail"
+
+
+def test_ablation_can_clear_port_leak():
+    """消融证明端口只影响一点点时，不能把结论判死。"""
+    warns = [_leak("port_leak", ["dst_port"])]
+    v = judge({"auc": 1.0, "fpr": 0.001, "recall": 1.0}, warns, n_test=2000,
+              ablation={"column": "dst_port", "rows": [{"model": "mlp", "delta": 0.0093}]},
+              used_features=["dst_port"])
+    leak = next(c for c in v.checks if c["name"] == "数据泄漏")
+    assert leak["status"] == "pass"
+    assert "不影响结论" in leak["detail"]
+    assert v.level != "fail"
+
+
+def test_ablation_heavy_drop_still_fails():
+    """消融掉得很多时，仍然判不可用。"""
+    warns = [_leak("port_leak", ["dst_port"])]
+    v = judge({"auc": 0.99, "fpr": 0.02, "recall": 0.97}, warns, n_test=2000,
+              ablation={"column": "dst_port", "rows": [{"delta": 0.4}]},
+              used_features=["dst_port"])
+    assert v.level == "fail"
+    assert "单一列" in v.headline
 
 
 def test_missing_fpr_is_warn_not_crash():

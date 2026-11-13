@@ -54,6 +54,19 @@ text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,.06)}
 .verdict table.check tr.warn td.st{color:var(--amber);font-weight:600}
 .verdict table.check tr.pass td.st{color:var(--ok)}
 .verdict .cap{margin-top:8px}
+.selfcheck{margin:14px 0 4px;padding:14px 18px;border:1px solid var(--rule);background:#fcfbf8}
+.sc-head{margin:0 0 10px;font-size:12px;color:var(--muted);letter-spacing:.02em}
+.sc-count{font-family:"IBM Plex Mono",monospace;color:var(--ink2);margin-left:6px}
+.sc-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px}
+.sc-list li{display:grid;grid-template-columns:16px 150px 1fr;gap:10px;align-items:baseline;
+padding:5px 0;font-size:12.5px;border-top:1px solid rgba(0,0,0,.05)}
+.sc-list li:first-child{border-top:0}
+.sc-list .box{width:13px;height:13px;border:1px solid var(--rule2);border-radius:2px;
+display:grid;place-items:center;font-size:9px;line-height:1;color:#fff}
+.sc-list li.ok .box{background:var(--ok);border-color:var(--ok)}
+.sc-list .ck-item{color:var(--ink2)}
+.sc-list li.todo .ck-item{color:var(--alert)}
+.sc-list .ck-note{color:var(--muted);font-size:12px}
 table.data{width:100%;border-collapse:collapse;font-size:13px}
 table.data thead th{text-align:left;font-size:11.5px;font-weight:600;color:var(--ink2);
 padding:0 12px 9px;border-bottom:1px solid var(--rule2);white-space:nowrap}
@@ -127,10 +140,19 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
                 ablation: dict | None = None) -> str:
     v = build_view(results, warns, meta, ablation)
 
+    # 徽标措辞跟着结论走，避免"结论说端口无影响、表格说受泄漏影响"
+    vd_level = (v.verdict or {}).get("level")
+    if vd_level == "fail":
+        port_col = next((w["columns"][0] for w in v.warnings if w["rule"] == "port_leak"), None)
+        best_badge = f"受 {port_col} 影响" if port_col else "指标待复核"
+    elif vd_level == "warn" and v.suspicious_auc:
+        best_badge = "最高分 · 需换数据确认"
+    else:
+        best_badge = "最佳"
     model_rows = "".join(
         f'<tr class="{"best" if m.is_best else ""}">'
         f'<th scope="row" class="mono">{_e(m.model)}'
-        f'{"<span class=best-tag>最佳</span>" if m.is_best else ""}</th>'
+        f'{f"<span class=best-tag>{best_badge}</span>" if m.is_best else ""}</th>'
         f'<td class="muted">{_e(m.kind_cn)}</td><td class="num">{_e(m.auc)}</td>'
         f'<td class="num">{_e(m.f1)}</td><td class="num">{_e(m.precision)}</td>'
         f'<td class="num">{_e(m.recall)}</td><td class="num">{_e(m.fpr)}</td>'
@@ -233,7 +255,26 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
             f"</section>"
         )
 
+    def _checklist_box() -> str:
+        if not v.checklist:
+            return ""
+        passed = sum(1 for i in v.checklist if i["ok"])
+        rows = "".join(
+            f'<li class="{"ok" if i["ok"] else "todo"}">'
+            f'<span class="box" aria-hidden="true">{"✓" if i["ok"] else ""}</span>'
+            f'<span class="ck-item">{_e(i["item"])}</span>'
+            f'<span class="ck-note">{_e(i["detail"])}</span></li>'
+            for i in v.checklist
+        )
+        tail = ('<p class="cap">未勾选的项补完再投稿；这些是审稿人最容易问到的。</p>'
+                if passed < len(v.checklist) else
+                '<p class="cap">全部通过，可以直接进附录。</p>')
+        return (f'<section class="selfcheck"><p class="sc-head">自查清单 '
+                f'<span class="sc-count">{passed}/{len(v.checklist)}</span></p>'
+                f'<ul class="sc-list">{rows}</ul>{tail}</section>')
+
     verdict_box = _verdict_box()
+    checklist_box = _checklist_box()
 
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
@@ -246,6 +287,7 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
 <p class="sub">{_e(v.source)} · {v.rows} 条流 · 指纹 {_e(v.hash)}</p>
 
 {verdict_box}
+{checklist_box}
 
 <div class="band">
   <div class="cell"><div class="k">最佳模型</div><div class="v mono">{_e(v.best_model)}</div>

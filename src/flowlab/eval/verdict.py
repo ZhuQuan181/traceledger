@@ -67,9 +67,18 @@ def judge(metrics: dict, warns: list[dict], n_test: int,
     leak_rules = {w["rule"] for w in warns}
     hard_leaks = _effective({"id_leak", "target_leak", "time_leak"})
     has_port_leak = bool(_effective({"port_leak"}))
-    # 端口痕迹 + 满分 AUC 同时出现：泄漏几乎肯定是主因，要升级成 fail，
-    # 否则同一处泄漏会在"数据泄漏=注意 / 指标可信度=不通过"之间自相矛盾
-    escalate_port = has_port_leak and auc is not None and auc >= BANDS["auc"]["suspicious"]
+    # 端口痕迹 + 满分 AUC 同时出现：通常泄漏是主因，升级成 fail。
+    # 但如果已经对这一点做过消融、且 Δ 很小，说明端口并没有在抬指标，
+    # 这时不该把结论判死——消融就是用来回答"这个泄漏是否真的起作用"的。
+    ablated_column = ablation.get("column") if ablation else None
+    ablated_delta = None
+    if ablation:
+        deltas = [r.get("delta") for r in ablation.get("rows", []) if r.get("delta") is not None]
+        ablated_delta = max(deltas) if deltas else None
+    port_tested_weak = (has_port_leak and ablated_column == "dst_port"
+                        and ablated_delta is not None and ablated_delta < 0.05)
+    escalate_port = (has_port_leak and auc is not None
+                     and auc >= BANDS["auc"]["suspicious"] and not port_tested_weak)
     dropped_leaks = leak_rules - hard_leaks - ({"port_leak"} if has_port_leak else set())
     checks: list[dict] = []
 
@@ -81,8 +90,12 @@ def judge(metrics: dict, warns: list[dict], n_test: int,
         checks.append({"name": "数据泄漏", "status": "fail",
                        "detail": "端口痕迹与满分 AUC 同时出现，模型学的很可能就是端口"})
     elif has_port_leak:
-        checks.append({"name": "数据泄漏", "status": "warn",
-                       "detail": "端口在某类攻击里高度集中，先跑消融确认"})
+        if port_tested_weak:
+            checks.append({"name": "数据泄漏", "status": "pass",
+                           "detail": f"端口有痕迹，但消融显示去掉它只掉 {ablated_delta:+.4f}，不影响结论"})
+        else:
+            checks.append({"name": "数据泄漏", "status": "warn",
+                           "detail": "端口在某类攻击里高度集中，先跑消融确认"})
     elif dropped_leaks:
         checks.append({"name": "数据泄漏", "status": "pass",
                        "detail": "命中的列（" + "、".join(sorted(dropped_leaks)) + "）已在训练前丢弃，不影响结果"})
@@ -95,6 +108,9 @@ def judge(metrics: dict, warns: list[dict], n_test: int,
         if effective_leak:
             checks.append({"name": "指标可信度", "status": "fail",
                            "detail": f"AUC {_fmt(auc)} 已达满分区间，先修泄漏再看这个数字"})
+        elif port_tested_weak:
+            checks.append({"name": "指标可信度", "status": "warn",
+                           "detail": f"AUC {_fmt(auc)} 满分，但已用消融排除端口；建议换一份数据再确认一次"})
         else:
             checks.append({"name": "指标可信度", "status": "warn",
                            "detail": f"AUC {_fmt(auc)} 极高但未发现有效泄漏，建议换一份数据交叉验证"})

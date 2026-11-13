@@ -72,13 +72,16 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
             {payload.warnings.some((w) => w.rule === "time_leak") && (
               <li>改用时间切分：随机切分会让"未来"进训练集。</li>
             )}
-            {(payload.results.find((r) => r.model === payload.best_model)?.metrics.auc ?? 0) >= 0.995
-              && payload.warnings.length > 0 && (
-              <li>AUC 已接近 1，先修泄漏再比较模型——现在的高低不说明泛化能力。</li>
-            )}
-            {(payload.dataset.test ?? 0) < 50 && <li>测试集不足 50 条，建议加大样本再下结论。</li>}
-            {payload.warnings.length === 0 && (
-              <li>没有明显泄漏，可以把这批参数记进实验历史，换数据集复现一次。</li>
+            {(() => {
+              // 只报结论卡里"没通过/需注意"的项，避免和结论卡打架
+              const items = (payload.verdict?.checks ?? [])
+                .filter((c) => c.status !== "pass")
+                .map((c) => <li key={c.name}>{c.detail}</li>);
+              if (items.length) return items;
+              return <li>这份结果没有待办项，把命令和指纹贴进附录即可复现。</li>;
+            })()}
+            {(payload.dataset.test ?? 0) < 500 && (
+              <li>测试集只有 {payload.dataset.test} 条，建议加大样本再下结论。</li>
             )}
           </ul>
         </section>

@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import pandas as pd
 
+from flowlab.eval.checklist import build_checklist
 from flowlab.eval.runner import EvalResult
 from flowlab.eval.verdict import judge
 from flowlab.report.html import render_html
 from flowlab.report.markdown import render_report
 
 
-def class_distribution(df: pd.DataFrame, label_col: str = "label", top: int = 8) -> list[dict]:
+def _class_distribution(df: pd.DataFrame, label_col: str = "label", top: int = 8) -> list[dict]:
     """标签分布（按数量降序，超出 top 的合并为「其他」）。"""
     if label_col not in df.columns:
         return []
@@ -43,7 +44,7 @@ def build_payload(df: pd.DataFrame, results: list[EvalResult], warns: list[dict]
         "labels": meta.get("labels", {}),
         "engineering": meta.get("engineering", {}),
         "format": meta.get("format", {}),
-        "classes": class_distribution(df, label_col),
+        "classes": _class_distribution(df, label_col),
         "features": {
             "used": results[0].features if results else [],
             "encoded": results[0].encoded_features if results else 0,
@@ -58,10 +59,14 @@ def build_payload(df: pd.DataFrame, results: list[EvalResult], warns: list[dict]
                     used_features=dataset["features"]["used"])
     report_meta["verdict"] = {"level": verdict.level, "headline": verdict.headline,
                               "reasons": verdict.reasons, "checks": verdict.checks}
+    checklist = build_checklist(dataset, warns, ablation,
+                               unresolved_leak=verdict.level == "fail")
+    report_meta["checklist"] = checklist
 
     return {
         "dataset": dataset,
         "verdict": report_meta["verdict"],
+        "checklist": checklist,
         "warnings": warns,
         "results": [r.to_dict() for r in results],
         "best_model": best.model if best else None,

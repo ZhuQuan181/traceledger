@@ -10,6 +10,7 @@ import { SignalStrip } from "./components/SignalStrip";
 import { AblationTable } from "./components/AblationTable";
 import { TopFlows } from "./components/TopFlows";
 import { VerdictCard } from "./components/VerdictCard";
+import { ChecklistCard } from "./components/ChecklistCard";
 
 const ALL = ["mlp", "iforest", "autoencoder"];
 
@@ -100,8 +101,16 @@ export default function App() {
   }
 
   const d = payload?.dataset;
-  const suspicious = Boolean(payload?.warnings.length) && (best?.metrics.auc ?? 0) >= 0.995;
+  // "受泄漏影响" 一律以结论卡为准：消融已排除端口时 verdict != fail，就不该再标红
+  const suspicious = payload?.verdict?.level === "fail"
+    || (payload?.verdict?.level === "warn" && payload.verdict.checks.some(
+         (c) => c.name === "指标可信度" && c.status === "warn" && c.detail.includes("满分")));
   const portLeakColumn = payload?.warnings.find((w) => w.rule === "port_leak")?.columns[0];
+  // 徽标措辞跟着结论走：消融已证明端口无影响时，不能再写"受泄漏影响"
+  const verdictLevel = payload?.verdict?.level;
+  const bestBadge = verdictLevel === "fail" ? (portLeakColumn ? `受 ${portLeakColumn} 影响` : "指标待复核")
+    : verdictLevel === "warn" && suspicious ? "最高分 · 需换数据确认"
+    : "最佳";
   const sectionNo = payload?.ablation ? { flow: "04" } : { flow: "03" };
 
   return (
@@ -170,7 +179,9 @@ export default function App() {
                       {num(best.metrics.auc)}
                       {suspicious && (
                         <span className="v-flag">
-                          待复核{portLeakColumn ? ` · ${portLeakColumn}` : ""}
+                          {verdictLevel === "fail"
+                            ? `待复核${portLeakColumn ? ` · ${portLeakColumn}` : ""}`
+                            : "需换数据确认"}
                         </span>
                       )}
                     </span>
@@ -187,20 +198,24 @@ export default function App() {
                   </div>
                   <div className="v-note">
                     {suspicious
-                      ? `AUC 接近满分且存在 ${payload.warnings.length} 条泄漏 — 先看下方结论。`
+                      ? `AUC 接近满分，${payload.warnings.length} 项泄漏待确认 — 先看下方结论。`
                       : best.kind === "supervised" ? "监督模型，使用训练集标签" : "无监督基线，不使用标签"}
                   </div>
                 </div>
               </header>
 
               {payload.verdict && <VerdictCard verdict={payload.verdict} />}
+              {payload.checklist && payload.checklist.length > 0 && (
+                <ChecklistCard items={payload.checklist} />
+              )}
 
               <section className="block">
                 <header className="block-head">
                   <h2><span className="idx">01</span>模型对比</h2>
                   <span className="aside">按 AUC 排序 · 同一份特征矩阵</span>
                 </header>
-                <MetricMatrix results={payload.results} bestModel={payload.best_model} suspicious={suspicious} />
+                <MetricMatrix results={payload.results} bestModel={payload.best_model}
+                              suspicious={suspicious} badge={bestBadge} />
               </section>
 
               <section className="block">

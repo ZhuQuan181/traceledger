@@ -96,6 +96,21 @@ def _verdict_block(v: ReportView) -> str:
     return "\n".join(out)
 
 
+def _checklist_block(v: ReportView) -> str:
+    """投稿前自查：人工逐条打勾，和自动判断互补。"""
+    if not v.checklist:
+        return ""
+    passed = sum(1 for i in v.checklist if i["ok"])
+    out = [f"## 自查清单（{passed}/{len(v.checklist)}）", ""]
+    for i in v.checklist:
+        mark = "x" if i["ok"] else " "
+        out.append(f"- [{mark}] **{i['item']}** — {i['detail']}")
+    if passed < len(v.checklist):
+        out += ["", "> 未勾选的项补完再投稿；这些是审稿人最容易问到的。"]
+    out.append("")
+    return "\n".join(out)
+
+
 def render_report(results: list[EvalResult], warns: list[dict], meta: dict,
                   ablation: dict | None = None) -> str:
     v = build_view(results, warns, meta, ablation)
@@ -104,6 +119,7 @@ def render_report(results: list[EvalResult], warns: list[dict], meta: dict,
         "# 流量异常检测实验报告", "",
         f"- 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", "",
         _verdict_block(v),
+        _checklist_block(v),
         "## 1. 数据与配置", "", _meta_table(v), "", _classes_line(v), _features_line(v),
         "## 2. 数据泄漏检查", "", _warn_table(v.warnings),
         "## 3. 模型对比", "", _model_table(v), "",

@@ -463,3 +463,37 @@ button, input, select { font: inherit; color: inherit; }
   .chk { grid-template-columns: 8px 1fr 44px; }
   .chk-detail { grid-column: 2 / -1; padding-top: 2px; }
 }
+
+/* ───────── 自查清单 ───────── */
+.checklist-card {
+  margin: 0 0 34px; padding: 14px 18px 12px;
+  border: 1px solid var(--rule); background: #fcfbf8; border-radius: 2px;
+}
+.checklist-card.done { border-color: #cfe3d8; background: #f8fbf9; }
+.cc-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.cc-head h2 {
+  margin: 0; font-size: 12px; font-weight: 600; color: var(--ink-2); letter-spacing: .02em;
+}
+.cc-count { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.checklist-card.done .cc-count { color: var(--ok); }
+
+.cc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.cc-list li {
+  display: grid; grid-template-columns: 16px 156px 1fr; gap: 10px; align-items: baseline;
+  padding: 5px 0; border-top: 1px solid rgba(0, 0, 0, .05); font-size: 12.5px;
+}
+.cc-list li:first-child { border-top: 0; }
+.cc-box {
+  width: 13px; height: 13px; border: 1px solid var(--rule-strong); border-radius: 2px;
+  display: grid; place-items: center; font-size: 9px; line-height: 1; color: #fff;
+}
+.cc-list li.ok .cc-box { background: var(--ok); border-color: var(--ok); }
+.cc-item { color: var(--ink-2); }
+.cc-list li.todo .cc-item { color: var(--alert); }
+.cc-note { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.cc-foot { margin: 8px 0 0; font-size: 10.5px; color: var(--muted); }
+
+@media (max-width: 720px) {
+  .cc-list li { grid-template-columns: 16px 1fr; }
+  .cc-note { grid-column: 2 / -1; }
+}
