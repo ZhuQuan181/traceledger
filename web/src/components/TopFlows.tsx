@@ -32,7 +32,7 @@ export function TopFlows({ flows, model }: { flows: TopFlow[]; model: string | n
               <td className="mono tiny dim">{f.timestamp ?? "—"}</td>
               <td className="score-cell">
                 <span className="mono tiny">{f.score.toFixed(3)}</span>
-                <span className="score-bar" style={{ width: `${Math.round(f.score * 100)}%` }} aria-hidden="true" />
+                <span className="score-bar" style={{ width: `calc((100% - 16px) * ${f.score.toFixed(3)})` }} aria-hidden="true" />
               </td>
               <td className="tiny">
                 {f.label ? <span className={String(f.label).toLowerCase() === "benign" ? "tag-ok" : "tag-bad"}>{f.label}</span> : "—"}

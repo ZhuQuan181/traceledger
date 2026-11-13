@@ -30,7 +30,8 @@ class MLPDetector(Detector):
             alpha=1e-4,
             max_iter=self._max_iter,
             early_stopping=early,
-            n_iter_no_change=15 if early else 5,
+            n_iter_no_change=30 if early else 5,
+            validation_fraction=0.15,
             random_state=self._seed,
             **self._extra,
         )

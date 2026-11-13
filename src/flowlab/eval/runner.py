@@ -39,6 +39,8 @@ class EvalResult:
     threshold: float = 0.5
     top_flows: list[dict] = field(default_factory=list)
     score_curve: list[dict] = field(default_factory=list)
+    seed: int = 42
+    attack_train: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -104,6 +106,7 @@ def run_experiment(df: pd.DataFrame, models: list[str] | None = None,
                 params=det.info().get("params", {}), split=split, dataset_hash=dh,
                 n_train=int(len(prep_tr.X)), n_test=int(len(prep_te.X)), threshold=threshold,
                 top_flows=top_flows, score_curve=score_curve,
+                seed=seed, attack_train=int((prep_tr.y == 1).sum()),
             )
         )
     return results, warns

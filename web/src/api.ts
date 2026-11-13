@@ -1,4 +1,4 @@
-import type { ModelInfo, Payload } from "./types";
+import type { ModelInfo, Payload, RunRow } from "./types";
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -15,6 +15,15 @@ export async function fetchModels(): Promise<ModelInfo[]> {
   return (await json<{ models: ModelInfo[] }>(res)).models;
 }
 
+export async function fetchHistory(): Promise<RunRow[]> {
+  const res = await fetch("/api/history?limit=8");
+  return (await json<{ runs: RunRow[] }>(res)).runs;
+}
+
+export async function loadRun(id: string): Promise<Payload> {
+  return json<Payload>(await fetch(`/api/history/${id}`));
+}
+
 export type DemoParams = {
   normal: number;
   attack: number;
@@ -22,6 +31,7 @@ export type DemoParams = {
   split: "temporal" | "random";
   models: string[];
   threshold: number;
+  ablate?: string | null;
 };
 
 export async function runDemo(p: DemoParams): Promise<Payload> {
@@ -45,6 +55,7 @@ export async function runUpload(
   form.append("models", p.models.join(","));
   form.append("threshold", String(p.threshold));
   form.append("seed", String(p.seed));
+  if (p.ablate) form.append("ablate", p.ablate);
   const res = await fetch("/api/upload", { method: "POST", body: form });
   return json<Payload>(res);
 }

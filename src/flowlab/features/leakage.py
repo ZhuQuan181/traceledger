@@ -74,7 +74,30 @@ def detect(df: pd.DataFrame, split: str = "temporal", label_col: str = "label") 
                     }
                 )
 
-    # 4) 常量列
+    # 4) 目标泄漏：某列几乎一对一决定标签（如 attack_type / category）
+    if label_col in df.columns:
+        y = df[label_col].astype(str).str.strip().str.lower()
+        n_classes = y.nunique()
+        for col in df.columns:
+            if col == label_col or col in id_like:
+                continue
+            s = df[col]
+            if s.nunique(dropna=True) <= 1 or s.nunique(dropna=True) > 50:
+                continue
+            # 每个取值对应的标签是否唯一
+            grouped = df.groupby(col, dropna=True)[label_col].nunique(dropna=True)
+            if len(grouped) and (grouped <= 1).mean() >= 0.95 and len(grouped) <= max(20, n_classes):
+                warns.append(
+                    {
+                        "rule": "target_leak",
+                        "columns": [col],
+                        "severity": "high",
+                        "message": f"`{col}` 的每个取值几乎只对应一个标签类别，等于把答案交给了模型。",
+                        "suggestion": "训练前删掉该列；它是标注结果，不是可观测特征。",
+                    }
+                )
+
+    # 5) 常量列
     const = [c for c in df.columns if c != label_col and df[c].nunique(dropna=False) <= 1]
     if const:
         warns.append(

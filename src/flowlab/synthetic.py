@@ -18,26 +18,35 @@ def generate(
     n_attack: int = 500,
     seed: int = 42,
     attack_label: str = "DDoS",
+    leakage_only: bool = False,
 ) -> pd.DataFrame:
-    """生成带标签的合成流量，返回未标准化的原始列名（模拟 CICFlowMeter 导出）。"""
+    """生成带标签的合成流量，返回未标准化的原始列名（模拟 CICFlowMeter 导出）。
+
+    leakage_only=True：攻击流与正常流在**所有行为特征上同分布**，只有目的端口不同。
+    这是用来演示"端口泄漏"的极端构造 —— 去掉端口后模型应当掉到随机水平。
+    """
     rng = np.random.default_rng(seed)
     n = n_normal + n_attack
 
     is_attack = np.zeros(n, dtype=bool)
     is_attack[n_normal:] = True
 
-    # 时长（微秒）：正常流长尾，攻击流短
-    duration = np.where(
-        is_attack,
-        rng.integers(1_000, 120_000, n),
-        np.clip(rng.lognormal(13.0, 1.4, n), 1_000, 3.6e9),
-    ).astype(np.int64)
+    # 时长（微秒）：正常流长尾；攻击流短（leakage_only 时与正常同分布）
+    benign_dur = np.clip(rng.lognormal(13.0, 1.4, n), 1_000, 3.6e9)
+    duration = (np.clip(rng.lognormal(13.0, 1.4, n), 1_000, 3.6e9) if leakage_only
+                else np.where(is_attack, rng.integers(1_000, 120_000, n), benign_dur)).astype(np.int64)
 
     # 包数 / 字节数
-    fwd_packets = np.where(is_attack, rng.integers(20, 400, n), rng.integers(1, 60, n))
-    bwd_packets = np.where(is_attack, rng.integers(0, 20, n), rng.integers(0, 80, n))
-    fwd_bytes = (fwd_packets * np.where(is_attack, 1200, 400)).astype(np.int64)
-    bwd_bytes = (bwd_packets * np.where(is_attack, 400, 800)).astype(np.int64)
+    if leakage_only:
+        fwd_packets = rng.integers(1, 60, n)
+        bwd_packets = rng.integers(0, 80, n)
+        fwd_bytes = (fwd_packets * 400).astype(np.int64)
+        bwd_bytes = (bwd_packets * 800).astype(np.int64)
+    else:
+        fwd_packets = np.where(is_attack, rng.integers(20, 400, n), rng.integers(1, 60, n))
+        bwd_packets = np.where(is_attack, rng.integers(0, 20, n), rng.integers(0, 80, n))
+        fwd_bytes = (fwd_packets * np.where(is_attack, 1200, 400)).astype(np.int64)
+        bwd_bytes = (bwd_packets * np.where(is_attack, 400, 800)).astype(np.int64)
 
     total_bytes = (fwd_bytes + bwd_bytes).astype(float)
     total_packets = (fwd_packets + bwd_packets).astype(float)
@@ -50,7 +59,8 @@ def generate(
     flip = is_attack & (rng.random(n) < 0.04)
     dst_port = np.where(flip, rng.choice(NORMAL_PORTS, n), dst_port)
 
-    protocol = np.where(is_attack, 17, rng.choice([6, 6, 6, 17], n))
+    protocol = (rng.choice([6, 6, 6, 17], n) if leakage_only
+                else np.where(is_attack, 17, rng.choice([6, 6, 6, 17], n)))
 
     ts = rng.uniform(1_700_000_000, 1_700_086_400, n)  # 每行独立采样，避免标签与时间相关
 

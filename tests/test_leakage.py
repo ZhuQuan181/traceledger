@@ -26,6 +26,13 @@ def test_port_leak_detected():
     assert any(w["rule"] == "port_leak" and "dst_port" in w["columns"] for w in warns)
 
 
+def test_target_leak_detected():
+    df = _df()
+    df["attack_type"] = df["label"].map({"BENIGN": "none", "DDoS": "ddos"})
+    rules = {w["rule"] for w in detect(df, split="temporal")}
+    assert "target_leak" in rules
+
+
 def test_clean_data_has_fewer_warnings():
     df = _df().drop(columns=["flow_id", "timestamp"])
     warns = detect(df, split="temporal")

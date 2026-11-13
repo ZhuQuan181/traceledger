@@ -17,6 +17,15 @@ def test_binary_labels_and_no_meta_columns():
     assert all("flow_id" not in n for n in p.feature_names)
 
 
+def test_label_never_used_as_feature():
+    df = _df()
+    p = build_matrix(df)
+    assert not any(n == "label" or n.startswith("label_") for n in p.feature_names), p.feature_names
+    tr, te = df.iloc[:250], df.iloc[250:]
+    a, b = build_matrix_pair(tr, te)
+    assert not any(n == "label" or n.startswith("label_") for n in a.feature_names)
+
+
 def test_pair_uses_train_statistics():
     df = _df()
     tr, te = df.iloc[:250], df.iloc[250:]

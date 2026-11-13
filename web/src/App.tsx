@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchModels, runDemo, runUpload } from "./api";
-import type { ModelInfo, Payload } from "./types";
+import { fetchHistory, fetchModels, loadRun, runDemo, runUpload } from "./api";
+import type { ModelInfo, Payload, RunRow } from "./types";
 import { StatusRail } from "./components/StatusRail";
 import { ControlPanel } from "./components/ControlPanel";
 import { SignalStrip } from "./components/SignalStrip";
 import { LeakList } from "./components/LeakList";
 import { ModelTable } from "./components/ModelTable";
 import { TopFlows } from "./components/TopFlows";
+import { AblationTable } from "./components/AblationTable";
 
 const ALL = ["mlp", "iforest", "autoencoder"];
 
@@ -18,16 +19,24 @@ export default function App() {
   const [attack, setAttack] = useState(500);
   const [split, setSplit] = useState<"temporal" | "random">("temporal");
   const [threshold, setThreshold] = useState(0.5);
+  const [ablate, setAblate] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [labelsFile, setLabelsFile] = useState<File | null>(null);
   const [payload, setPayload] = useState<Payload | null>(null);
+  const [history, setHistory] = useState<RunRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    fetchModels().then(setModels).catch(() => setModels(ALL.map((n) => ({ name: n, kind: n === "mlp" ? "supervised" : "unsupervised" }))));
+    fetchModels().then(setModels).catch(() =>
+      setModels(ALL.map((n) => ({ name: n, kind: n === "mlp" ? "supervised" : "unsupervised" }))));
+    refreshHistory();
   }, []);
+
+  function refreshHistory() {
+    fetchHistory().then(setHistory).catch(() => setHistory([]));
+  }
 
   const best = useMemo(() => {
     if (!payload?.results.length) return null;
@@ -38,14 +47,27 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      const params = { seed: 42, split, models: selected, threshold };
+      const params = { seed: 42, split, models: selected, threshold, ablate: ablate || null };
       const data = source === "demo"
         ? await runDemo({ ...params, normal, attack })
         : await runUpload(file!, params, labelsFile);
       setPayload(data);
+      refreshHistory();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setPayload(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openRun(id: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      setPayload(await loadRun(id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -55,12 +77,22 @@ export default function App() {
     setSelected((s) => (s.includes(name) ? s.filter((x) => x !== name) : [...s, name]));
   }
 
-  function download() {
+  function downloadMd() {
     if (!payload) return;
     const blob = new Blob([payload.report_md], { type: "text/markdown;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `flowlab-report-${payload.dataset.hash}.md`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function downloadHtml() {
+    if (!payload) return;
+    const blob = new Blob([payload.report_html], { type: "text/html;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `flowlab-report-${payload.dataset.hash}.html`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -91,10 +123,15 @@ export default function App() {
           onSplit={setSplit}
           threshold={threshold}
           onThreshold={setThreshold}
+          ablate={ablate}
+          onAblate={setAblate}
           file={file}
           onFile={setFile}
           labelsFile={labelsFile}
           onLabelsFile={setLabelsFile}
+          history={history}
+          activeRun={payload?.run_id}
+          onOpenRun={openRun}
           busy={busy}
           onRun={run}
           error={error}
@@ -113,7 +150,7 @@ export default function App() {
               <ul>
                 <li>数据默认用合成流量，不碰你的真实数据。</li>
                 <li>时间切分优先，随机切分会触发时间泄漏警告。</li>
-                <li>每个模型都在同一份预处理上训练，指标可直接对比。</li>
+                <li>勾一个消融列，可以看到指标是不是靠它撑着。</li>
               </ul>
             </section>
           )}
@@ -128,22 +165,25 @@ export default function App() {
                   {payload.dataset.split === "temporal" ? "时间切分" : "随机切分"} · 阈值{" "}
                   {payload.dataset.threshold.toFixed(2)}
                   {payload.dataset.labels?.mode && (
-                    <span className="dim"> · 标签对齐 {payload.dataset.labels.mode}
+                    <span className="dim"> · 标签 {payload.dataset.labels.mode}
                       （{payload.dataset.labels.labelled}/{payload.dataset.labels.total}）</span>
                   )}
                   {payload.dataset.engineering?.min_duration_ms && (
                     <span className="dim"> · 速率兜底 {payload.dataset.engineering.min_duration_ms} ms</span>
                   )}
+                  {payload.run_id && <span className="dim mono"> · run {payload.run_id}</span>}
                 </p>
                 <div className="actions">
                   <button onClick={copy}>{copied ? "已复制" : "复制 Markdown"}</button>
-                  <button className="primary" onClick={download}>下载报告</button>
+                  <button onClick={downloadMd}>下载 MD</button>
+                  <button className="primary" onClick={downloadHtml}>下载 HTML 报告</button>
                 </div>
               </section>
 
-              <SignalStrip curve={best?.score_curve ?? []} threshold={payload.dataset.threshold} />
+              <SignalStrip curve={best?.score_curve ?? payload.score_curve ?? []} threshold={payload.dataset.threshold} />
               <LeakList warnings={payload.warnings} />
               <ModelTable results={payload.results} bestModel={payload.best_model} />
+              {payload.ablation && <AblationTable ablation={payload.ablation} />}
               <TopFlows flows={payload.top_flows} model={payload.best_model} />
             </div>
           )}

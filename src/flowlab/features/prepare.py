@@ -14,6 +14,9 @@ from flowlab.schema import META_COLUMNS
 
 BENIGN = "benign"
 
+# 端口与协议是名义变量，不是有序数值：一律 one-hot，避免"3333 < 5432"这种伪序关系
+CATEGORICAL_FORCE = {"src_port", "dst_port", "protocol"}
+
 
 @dataclass
 class Prepared:
@@ -38,8 +41,7 @@ def build_matrix(df: pd.DataFrame, label_col: str = "label", drop_extra: list[st
     if label_col not in df.columns:
         raise ValueError(f"缺少标签列 {label_col!r}，可用列: {list(df.columns)[:12]}")
 
-    drop = (set(META_COLUMNS) | set(drop_extra or [])) & set(df.columns)
-    drop.discard(label_col)
+    drop = ((set(META_COLUMNS) | set(drop_extra or [])) & set(df.columns)) | {label_col}
     feats = df.drop(columns=list(drop))
 
     # 全空列直接丢
@@ -47,6 +49,8 @@ def build_matrix(df: pd.DataFrame, label_col: str = "label", drop_extra: list[st
     if feats.shape[1] == 0:
         raise ValueError("没有可用特征列")
 
+    for c in CATEGORICAL_FORCE & set(feats.columns):
+        feats[c] = feats[c].astype(str)
     num_cols = [c for c in feats.columns if pd.api.types.is_numeric_dtype(feats[c])]
     cat_cols = [c for c in feats.columns if c not in num_cols]
 
@@ -56,7 +60,9 @@ def build_matrix(df: pd.DataFrame, label_col: str = "label", drop_extra: list[st
                                                ("sc", StandardScaler())]), num_cols))
     if cat_cols:
         transformers.append(("cat", Pipeline([("imp", SimpleImputer(strategy="most_frequent")),
-                                               ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False))]), cat_cols))
+                                               ("oh", OneHotEncoder(handle_unknown="ignore",
+                                                                    min_frequency=10,
+                                                                    sparse_output=False))]), cat_cols))
 
     ct = ColumnTransformer(transformers, remainder="drop", verbose_feature_names_out=False)
     X = ct.fit_transform(feats)
@@ -71,13 +77,15 @@ def build_matrix_pair(train_df: pd.DataFrame, test_df: pd.DataFrame,
     if label_col not in train_df.columns or label_col not in test_df.columns:
         raise ValueError(f"缺少标签列 {label_col!r}")
 
-    drop = (set(META_COLUMNS)) & set(train_df.columns)
-    drop.discard(label_col)
+    drop = ((set(META_COLUMNS)) & set(train_df.columns)) | {label_col}
     feats_tr = train_df.drop(columns=list(drop))
     feats_te = test_df.drop(columns=[c for c in drop if c in test_df.columns])
     keep = [c for c in feats_tr.columns if feats_tr[c].notna().any()]
     feats_tr, feats_te = feats_tr[keep], feats_te[[c for c in keep if c in feats_te.columns]]
 
+    for c in CATEGORICAL_FORCE & set(keep):
+        feats_tr[c] = feats_tr[c].astype(str)
+        feats_te[c] = feats_te[c].astype(str)
     num_cols = [c for c in keep if pd.api.types.is_numeric_dtype(feats_tr[c])]
     cat_cols = [c for c in keep if c not in num_cols]
     transformers = []
@@ -86,7 +94,9 @@ def build_matrix_pair(train_df: pd.DataFrame, test_df: pd.DataFrame,
                                                ("sc", StandardScaler())]), num_cols))
     if cat_cols:
         transformers.append(("cat", Pipeline([("imp", SimpleImputer(strategy="most_frequent")),
-                                               ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False))]), cat_cols))
+                                               ("oh", OneHotEncoder(handle_unknown="ignore",
+                                                                    min_frequency=10,
+                                                                    sparse_output=False))]), cat_cols))
 
     ct = ColumnTransformer(transformers, remainder="drop", verbose_feature_names_out=False)
     Xtr = np.asarray(ct.fit_transform(feats_tr), dtype=float)

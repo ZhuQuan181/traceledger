@@ -1,4 +1,5 @@
-import type { ModelInfo } from "../types";
+import type { ModelInfo, RunRow } from "../types";
+import { HistoryList } from "./HistoryList";
 
 type Props = {
   models: ModelInfo[];
@@ -14,10 +15,15 @@ type Props = {
   onSplit: (s: "temporal" | "random") => void;
   threshold: number;
   onThreshold: (t: number) => void;
+  ablate: string;
+  onAblate: (col: string) => void;
   file: File | null;
   onFile: (f: File | null) => void;
   labelsFile: File | null;
   onLabelsFile: (f: File | null) => void;
+  history: RunRow[];
+  activeRun?: string;
+  onOpenRun: (id: string) => void;
   busy: boolean;
   onRun: () => void;
   error: string | null;
@@ -112,7 +118,21 @@ export function ControlPanel(p: Props) {
                  aria-label="判定阈值" onChange={(e) => p.onThreshold(Number(e.target.value))} />
           <output className="mono">{p.threshold.toFixed(2)}</output>
         </div>
-        <p className="hint">分数高于阈值即判为攻击。调低会抓更多，也会误报更多。</p>
+        <label className="inline-field">
+          <span>消融列</span>
+          <select name="ablate" value={p.ablate} onChange={(e) => p.onAblate(e.target.value)}>
+            <option value="">不消融</option>
+            <option value="dst_port">dst_port</option>
+            <option value="protocol">protocol</option>
+            <option value="duration_us">duration_us</option>
+          </select>
+        </label>
+        <p className="hint">去掉该列重跑一次：Δ 为正说明原来的指标靠这一列撑着。</p>
+      </section>
+
+      <section className="block">
+        <h2>历史</h2>
+        <HistoryList runs={p.history} active={p.activeRun} onOpen={p.onOpenRun} />
       </section>
 
       <div className="run-wrap">

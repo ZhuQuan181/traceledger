@@ -3,7 +3,7 @@
 > 工作名（占位，可改）。一句话：**把网络流量异常检测的研究模型，变成能跑、能复现、能解释的系统。**
 
 - 创建：2026-11-11
-- 状态：**M2 / v0.2 完成**（2026-11-13：CLI + API + Web + pcap 旁挂标签 + 39 个测试）
+- 状态：**M3 / v0.3 完成**（2026-11-13：HTML 报告 + 本地实验历史 + 消融实验 + 41 个测试）
 - 负责人：zq（实现由 Hermes 完成）
 - 文档语言：中文；代码与接口用英文
 
@@ -35,8 +35,13 @@ pcap 需要本机 `tshark`（Ubuntu: `sudo apt install tshark`）。
 | `flowlab run FILE --labels L` | pcap 旁挂标签（flow_id / 五元组 / 行序三种对齐） |
 | `flowlab serve` | 本地 Web 工作台 |
 | `flowlab models` | 列出已注册模型 |
+| `flowlab history` | 最近的实验（本地 SQLite，`~/.flowlab/flowlab.db`） |
+| `flowlab show ID` | 回看某次实验，可导出 MD / HTML |
+| `flowlab compare ID1 ID2` | 跨实验对比最佳指标 |
 
-通用参数：`--models mlp,iforest`、`--split temporal|random`、`--seed`、`--json`、`--report PATH`。
+通用参数：`--models mlp,iforest`、`--split temporal|random`、`--seed`、`--threshold`、
+`--ablate COLUMN`（去掉某列重跑，量化它撑了多少指标）、`--html PATH`（单文件报告）、
+`--report PATH`（Markdown）、`--json`、`--no-save`。
 
 ## 架构
 
@@ -46,7 +51,8 @@ CSV / pcap
    ↓ features      泄漏检测 → 训练/测试分离的预处理
    ↓ models        registry 插件（mlp / iforest / autoencoder / 你的）
    ↓ eval          时间/随机切分 → AUC·F1·FPR·混淆矩阵
-   ↓ report/api    Markdown 报告 + FastAPI + React 界面
+   ↓ report/api    Markdown / 单文件 HTML 报告 + FastAPI + React 界面
+  ↓ store         SQLite 实验历史（本地，不上传）
 ```
 
 加载管线（CLI 与 API 共用）：
