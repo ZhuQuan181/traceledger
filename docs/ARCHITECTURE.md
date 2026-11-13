@@ -107,7 +107,7 @@ dataset_hash / n_train / n_test / threshold / seed / attack_train / top_flows / 
 |---|---|---|
 | 支持一种新文件格式 | `ingest/table.py` 加一个分支；`ingest/__init__.py` 加后缀 | 不用 |
 | 支持一种新数据形状 | `adapters/shapes.py` 的 `to_frame()` | 不用 |
-| 接自己的模型 | `models/your.py` + `@register("name")` | 不用（自动发现） |
+| 接自己的模型 | 复制 `models/_template.py` → 改名 + `@register("name")` | 不用（自动发现，`_` 开头的文件不加载） |
 | 加一条泄漏规则 | `features/leakage.py` 的 `detect()` 里 append 一条 | 不用 |
 | 改指标口径 | `eval/metrics.py` | 报告会自动跟着变 |
 | 加报告章节 | `report/markdown.py` + `report/html.py` + `App.tsx` | 三处都要改，这是已知成本 |
@@ -122,6 +122,10 @@ dataset_hash / n_train / n_test / threshold / seed / attack_train / top_flows / 
 5. **数据指纹随内容变化**：`test_hash_changes_with_data`
 6. **切分后类别缺失要告警**：`test_*coverage*` / runner 抛错
 7. **未知格式要给人话错误**：`ShapeError` 带 keys/shape 描述
+8. **只对真正进特征的泄漏报警**：`test_id_leak_on_dropped_column_does_not_block`
+9. **消融能推翻泄漏判断**：`test_ablation_can_clear_port_leak`（Δ<0.05 时不该判死）
+10. **结论 / 清单 / 徽标由同一个 verdict 驱动**：三处措辞不一致就是 bug
+    （`test_unresolved_leak_blocks_even_if_not_hard` 盯这一条）
 
 ## 六、这次重构做了什么（v0.4）
 
