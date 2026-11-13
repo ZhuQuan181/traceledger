@@ -16,6 +16,7 @@ export function RunTimeline({ runs, active, onOpen }: {
         >
           <span className="chip-hash">{r.id.slice(0, 4)}</span>
           <span className="chip-auc">{r.best_auc == null ? "—" : r.best_auc.toFixed(3)}</span>
+          <span className="chip-time">{(r.created_at || "").slice(11, 16)}</span>
         </button>
       ))}
     </div>

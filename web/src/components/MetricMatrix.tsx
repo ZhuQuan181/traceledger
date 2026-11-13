@@ -10,7 +10,7 @@ function val(r: Result, k: Key): number {
   return v == null ? -1 : (v as number);
 }
 
-export function MetricMatrix({ results, bestModel }: { results: Result[]; bestModel: string | null }) {
+export function MetricMatrix({ results, bestModel, suspicious }: { results: Result[]; bestModel: string | null; suspicious?: boolean }) {
   const [sortKey, setSortKey] = useState<Key>("auc");
   const rows = useMemo(() => [...results].sort((a, b) => val(b, sortKey) - val(a, sortKey)), [results, sortKey]);
   const th = (k: Key, label: string) => (
@@ -44,7 +44,11 @@ export function MetricMatrix({ results, bestModel }: { results: Result[]; bestMo
             <th scope="row">
               <span className="lead">{r.model}</span>
               <span className="row-sub">{r.kind === "supervised" ? "监督" : "无监督"}</span>
-              {r.model === bestModel && <span className="best-tag">最佳</span>}
+              {r.model === bestModel && (
+                <span className={`best-tag ${suspicious ? "warn" : ""}`}>
+                  {suspicious ? "最高分 · 受泄漏影响" : "最佳"}
+                </span>
+              )}
             </th>
             <td className="num strong">
               {num(r.metrics.auc)}

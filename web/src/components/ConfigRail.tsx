@@ -132,6 +132,7 @@ export function ConfigRail(p: Props) {
           {p.busy ? "实验进行中…" : "运行实验"}
         </button>
         {p.error && <p className="error" role="alert">{p.error}</p>}
+        <p className="rail-note">本地运行 · 数据与报告都不出这台机器</p>
       </section>
     </aside>
   );

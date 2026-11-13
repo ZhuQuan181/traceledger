@@ -2,7 +2,8 @@ type Bucket = { p: number; h: number };
 
 export function SignalStrip({ curve, threshold }: { curve: Bucket[]; threshold: number }) {
   if (!curve.length) return null;
-  const hits = curve.filter((b) => b.h > 0).length;
+  const HIT = 0.2;  // 窗口内至少 20% 的流超阈值才标红，避免"每条窗口都有 1 条攻击"时整条全红
+  const hits = curve.filter((b) => b.h >= HIT).length;
   return (
     <>
       <div className="signal" role="img"
@@ -13,15 +14,10 @@ export function SignalStrip({ curve, threshold }: { curve: Bucket[]; threshold: 
             {curve.map((b, i) => (
               <span
                 key={i}
-                className="tick"
+                className={`tick ${b.h >= HIT ? "hit" : ""}`}
                 style={{ height: `${Math.max(2, Math.min(100, b.p * 100))}%` }}
                 title={`第 ${i + 1} 窗 · 最高分 ${b.p.toFixed(3)} · 超阈值比例 ${(b.h * 100).toFixed(0)}%`}
               />
-            ))}
-          </div>
-          <div className="hit-strip" aria-hidden="true">
-            {curve.map((b, i) => (
-              <span key={i} className={b.h > 0 ? "hit" : ""} style={{ opacity: b.h > 0 ? 0.35 + 0.65 * Math.min(1, b.h * 3) : 0 }} />
             ))}
           </div>
           <div className="signal-base" aria-hidden="true" />
@@ -34,7 +30,7 @@ export function SignalStrip({ curve, threshold }: { curve: Bucket[]; threshold: 
         <span>窗口 1</span>
         <span>
           <i className="legend-bar" aria-hidden="true" /> 柱高＝该窗最高分
-          <i className="legend-hit" aria-hidden="true" /> 红色＝窗内含超阈值流（{hits}/{curve.length}）
+          <i className="legend-hit" aria-hidden="true" /> 红色柱＝窗内 ≥20% 的流超阈值（{hits}/{curve.length}）
         </span>
         <span>窗口 {curve.length}</span>
       </div>

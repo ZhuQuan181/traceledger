@@ -100,14 +100,13 @@ export default function App() {
 
   const d = payload?.dataset;
   const suspicious = Boolean(payload?.warnings.length) && (best?.metrics.auc ?? 0) >= 0.995;
+  const portLeakColumn = payload?.warnings.find((w) => w.rule === "port_leak")?.columns[0];
   const sectionNo = payload?.ablation ? { flow: "04" } : { flow: "03" };
 
   return (
     <div className="shell">
       <a className="skip" href="#main">跳到主要内容</a>
-      <TopBar payload={payload} busy={busy} runs={history} activeRun={payload?.run_id}
-              onOpenRun={openRun}
-              onDownloadHtml={() => payload && save(payload.report_html, "text/html", "html")} />
+      <TopBar payload={payload} busy={busy} runs={history} activeRun={payload?.run_id} onOpenRun={openRun} />
 
       <div className="workspace">
         <ConfigRail
@@ -139,7 +138,7 @@ export default function App() {
                 <li>多个模型共用同一份特征矩阵，指标才真的可比。</li>
               </ol>
               <div className="intro-actions">
-                <button className="ghost-btn solid intro-run" onClick={() => run()}
+                <button className="ghost-btn outline intro-run" onClick={() => run()}
                         disabled={busy || selected.length === 0}>用当前配置跑一次</button>
                 {history.length > 0 && <span className="hint">或点顶部的历史实验</span>}
               </div>
@@ -168,7 +167,11 @@ export default function App() {
                     <span className="v-k">AUC</span>
                     <span className={`v-v ${suspicious ? "caution" : ""}`}>
                       {num(best.metrics.auc)}
-                      {suspicious && <span className="v-flag">待复核</span>}
+                      {suspicious && (
+                        <span className="v-flag">
+                          待复核{portLeakColumn ? ` · ${portLeakColumn}` : ""}
+                        </span>
+                      )}
                     </span>
                   </div>
                   <div className="v-item">
@@ -194,7 +197,7 @@ export default function App() {
                   <h2><span className="idx">01</span>模型对比</h2>
                   <span className="aside">按 AUC 排序 · 同一份特征矩阵</span>
                 </header>
-                <MetricMatrix results={payload.results} bestModel={payload.best_model} />
+                <MetricMatrix results={payload.results} bestModel={payload.best_model} suspicious={suspicious} />
               </section>
 
               <section className="block">
@@ -236,6 +239,7 @@ export default function App() {
           payload={payload}
           onCopy={copy}
           onDownloadMd={() => payload && save(payload.report_md, "text/markdown", "md")}
+          onDownloadHtml={() => payload && save(payload.report_html, "text/html", "html")}
           onRerunWithout={(col) => { setAblate(col); run({ ablate: col }); }}
           copied={copied}
         />

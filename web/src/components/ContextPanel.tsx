@@ -1,10 +1,11 @@
 import type { Payload } from "../types";
 import { LeakList } from "./LeakList";
 
-export function ContextPanel({ payload, onCopy, onDownloadMd, onRerunWithout, copied }: {
+export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, onRerunWithout, copied }: {
   payload: Payload | null;
   onCopy: () => void;
   onDownloadMd: () => void;
+  onDownloadHtml: () => void;
   onRerunWithout: (column: string) => void;
   copied: boolean;
 }) {
@@ -19,7 +20,7 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onRerunWithout, co
         {payload ? <LeakList warnings={payload.warnings} /> : <p className="hint">跑一次实验后显示。</p>}
         {anyLeak && (
           <button className="wide-btn act" onClick={() => onRerunWithout(anyLeak.columns[0] as string)}>
-            去掉 {String(anyLeak.columns[0])} 重跑一次
+            → 去掉 {String(anyLeak.columns[0])} 重跑，对比 AUC 变化
           </button>
         )}
       </section>
@@ -42,9 +43,6 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onRerunWithout, co
         <section>
           <h2>下一步</h2>
           <ul className="steps">
-            {payload.warnings.some((w) => w.rule === "port_leak") && (
-              <li>去掉 <code>dst_port</code> 重跑，对比 AUC 掉多少；掉得多说明原来学的是端口。</li>
-            )}
             {payload.warnings.some((w) => w.rule === "time_leak") && (
               <li>改用时间切分：随机切分会让"未来"进训练集。</li>
             )}
@@ -61,7 +59,7 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onRerunWithout, co
       )}
 
       {payload && (
-        <section>
+        <section className="export-block">
           <h2>导出</h2>
           <button className="wide-btn" onClick={onCopy}>{copied ? "已复制 Markdown" : "复制 Markdown"}</button>
           <button className="wide-btn" onClick={onDownloadMd}>下载 Markdown</button>
