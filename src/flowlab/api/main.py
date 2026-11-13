@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from flowlab.models.registry import available
 from flowlab.pipeline import load_frame
-from flowlab.service import ExperimentSpec, execute
+from flowlab.service import ExperimentSpec, demo_frame, execute
 from flowlab.store import get_run, list_runs, save_run
 
 app = FastAPI(title="FlowLab", version="0.4.0")
@@ -60,20 +60,11 @@ def formats():
 @app.post("/api/demo")
 def demo(req: DemoRequest):
     _validate(req.models)
-    from flowlab.engineer import add_engineered_features, describe
-    from flowlab.schema import normalize_columns
-    from flowlab.synthetic import generate
-
-    df = add_engineered_features(
-        normalize_columns(generate(n_normal=req.normal, n_attack=req.attack,
-                                   seed=req.seed, leakage_only=req.leaky)))
-    meta = {"engineering": describe(),
-            "labels": {"mode": "embedded", "labelled": len(df), "total": len(df)},
-            "format": {"format": "synthetic", "shape": f"{len(df)} 行"}}
+    df, meta, source = demo_frame(req.normal, req.attack, req.seed, req.leaky)
     spec = ExperimentSpec(models=req.models, split=req.split, seed=req.seed,
                           threshold=req.threshold, ablate=req.ablate)
     try:
-        payload = execute(df, meta, "合成数据（端口泄漏版）" if req.leaky else "合成数据", spec)
+        payload = execute(df, meta, source, spec)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -148,6 +139,13 @@ async def upload(file: UploadFile = File(...), labels: UploadFile | None = File(
 @app.get("/api/history")
 def history(limit: int = 20):
     return {"runs": list_runs(limit)}
+
+
+@app.delete("/api/history")
+def history_prune(keep: int = 50):
+    from flowlab.store import count, prune
+    removed = prune(keep)
+    return {"deleted": removed, "remaining": count()}
 
 
 @app.get("/api/history/{run_id}")

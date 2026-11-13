@@ -1,6 +1,7 @@
 export type Warning = {
   rule: string;
   columns: (string | number)[];
+  value?: number;
   severity: "high" | "medium" | "low";
   message: string;
   suggestion: string;

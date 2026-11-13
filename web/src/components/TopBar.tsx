@@ -1,27 +1,32 @@
-import type { Payload } from "../types";
+import type { Payload, RunRow } from "../types";
+import { RunTimeline } from "./RunTimeline";
 
-export function TopBar({ payload, busy, onDownloadMd, onDownloadHtml }: {
+export function TopBar({ payload, busy, runs, activeRun, onOpenRun, onDownloadHtml }: {
   payload: Payload | null;
   busy: boolean;
-  onDownloadMd: () => void;
+  runs: RunRow[];
+  activeRun?: string;
+  onOpenRun: (id: string) => void;
   onDownloadHtml: () => void;
 }) {
   return (
     <header className="topbar">
       <div className="wordmark">
         <strong>FlowLab</strong>
-        <span>流量异常检测工作台</span>
+        <span>流量异常检测</span>
       </div>
+
+      <div className="timeline-wrap">
+        <span className={`live ${busy ? "busy" : ""}`} aria-hidden="true" />
+        <span className="timeline-label">最近</span>
+        <RunTimeline runs={runs} active={activeRun} onOpen={onOpenRun} />
+      </div>
+
       <div className="top-actions">
-        <span className="run-chip">
-          <span className={`dot ${busy ? "busy" : ""}`} aria-hidden="true" />
-          {busy ? "运行中" : payload ? `run ${payload.run_id ?? payload.dataset.hash}` : "空闲"}
-        </span>
-        {payload && (
-          <>
-            <button className="ghost-btn" onClick={onDownloadMd}>Markdown</button>
-            <button className="ghost-btn solid" onClick={onDownloadHtml}>HTML 报告</button>
-          </>
+        {payload ? (
+          <button className="ghost-btn solid" onClick={onDownloadHtml}>下载 HTML 报告</button>
+        ) : (
+          <span className="idle">{busy ? "运行中…" : "未运行"}</span>
         )}
       </div>
     </header>

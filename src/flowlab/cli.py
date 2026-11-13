@@ -9,12 +9,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+
+import pandas as pd
 from pathlib import Path
 
 from flowlab.eval.table import markdown_table
 from flowlab.features.leakage import summarize
 from flowlab.pipeline import load_frame
-from flowlab.service import ExperimentSpec, execute, results_of
+from flowlab.service import ExperimentSpec, demo_frame, execute, results_of, score_frame
 
 
 def _add_run_flags(p: argparse.ArgumentParser) -> None:
@@ -61,6 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     h = sub.add_parser("history", help="最近的实验（本地 SQLite）")
     h.add_argument("--limit", type=int, default=20)
+    h.add_argument("--prune", type=int, metavar="KEEP", help="只保留最近 KEEP 条，其余删除")
 
     sh = sub.add_parser("show", help="查看某次实验，可导出报告")
     sh.add_argument("run_id")
@@ -130,7 +133,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "history":
-        from flowlab.store import list_runs
+        from flowlab.store import count, list_runs, prune
+        if args.prune is not None:
+            removed = prune(args.prune)
+            print(f"已清理 {removed} 条，剩余 {count()} 条。")
+            return 0
         runs = list_runs(args.limit)
         if not runs:
             print("还没有实验记录。跑一次 `flowlab demo`。")
@@ -175,8 +182,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "score":
-        from flowlab.features.prepare import build_feature_matrix
-        from flowlab.models.registry import create
         if not args.file.exists():
             print(f"文件不存在: {args.file}", file=sys.stderr)
             return 2
@@ -186,23 +191,14 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:
             print(f"读取失败: {exc}", file=sys.stderr)
             return 2
-        df = loaded.df
-        X, feats = build_feature_matrix(df)
-        det = create(args.model)
-        det.fit(X, None)
-        view = df.copy()
-        view["score"] = det.score(X)
-        show = [c for c in ("src_ip", "dst_ip", "dst_port", "protocol", "timestamp",
-                            "bytes_per_s", "packets_per_s") if c in view.columns]
-        top = view.sort_values("score", ascending=False).head(args.top)
+        rows = score_frame(loaded.df, model=args.model, top=args.top)
         if args.json:
-            print(json.dumps(top[show + ["score"]].round(4).to_dict("records"),
-                             ensure_ascii=False, indent=2))
+            print(json.dumps(rows, ensure_ascii=False, indent=2))
         else:
-            print(f"== Top {len(top)} 可疑流（模型 {args.model}，共 {len(view)} 条）==")
+            print(f"== Top {len(rows)} 可疑流（模型 {args.model}，共 {len(loaded.df)} 条）==")
             if loaded.label_info:
                 print(f"   标签对齐: {loaded.label_info}")
-            print(top[show + ["score"]].round(4).to_string(index=False))
+            print(pd.DataFrame(rows).to_string(index=False))
         return 0
 
     # demo / run
@@ -212,16 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if args.cmd == "demo":
-        from flowlab.engineer import add_engineered_features, describe
-        from flowlab.schema import normalize_columns
-        from flowlab.synthetic import generate
-        raw = normalize_columns(generate(n_normal=args.normal, n_attack=args.attack,
-                                         seed=args.seed, leakage_only=args.leaky))
-        df = add_engineered_features(raw)
-        source = f"合成数据（{'端口泄漏版' if args.leaky else '多信号版'}）"
-        meta = {"engineering": describe(),
-                "labels": {"mode": "embedded", "labelled": len(df), "total": len(df)},
-                "format": {"format": "synthetic", "shape": f"{len(df)} 行"}}
+        df, meta, source = demo_frame(args.normal, args.attack, args.seed, args.leaky)
     else:
         if not args.file.exists():
             print(f"文件不存在: {args.file}", file=sys.stderr)

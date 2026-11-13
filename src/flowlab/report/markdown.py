@@ -1,97 +1,82 @@
-"""报告渲染：一份能贴进论文附录、也能给同事看的 Markdown。"""
+"""Markdown 报告：只做排版，所有数值来自 ReportView。"""
 from __future__ import annotations
 
 from datetime import datetime
 
 from flowlab.eval.runner import EvalResult
-from flowlab.eval.table import markdown_table
+from flowlab.report.view import ReportView, build_view
 
 
-def _warn_block(warns: list[dict]) -> str:
+def _meta_table(v: ReportView) -> str:
+    rows = [
+        ("数据来源", f"{v.source}（{v.fmt}）"),
+        ("样本量", f"{v.rows}（训练 {v.train} / 测试 {v.test}）"),
+        ("攻击样本", f"训练 {v.attack_train} / 测试 {v.attack_test}"),
+        ("数据指纹", f"`{v.hash}`"),
+        ("切分方式", v.split),
+        ("随机种子", str(v.seed)),
+        ("判定阈值", v.threshold),
+        ("标签对齐", f"{v.labels_mode}（{v.labels_labelled}/{v.labels_total}）" if v.labels_total else v.labels_mode),
+        ("速率兜底", f"{v.min_duration_ms} ms"),
+    ]
+    return "| 项 | 值 |\n|---|---|\n" + "\n".join(f"| {k} | {val} |" for k, val in rows)
+
+
+def _warn_table(warns: list[dict]) -> str:
     if not warns:
         return "未检测到明显的数据泄漏。\n"
     out = ["| 严重度 | 规则 | 涉及列 | 说明 | 建议 |", "|---|---|---|---|---|"]
     for w in warns:
-        out.append(
-            f"| {w['severity']} | `{w['rule']}` | {', '.join(map(str, w['columns']))} | "
-            f"{w['message']} | {w['suggestion']} |"
-        )
+        out.append(f"| {w['severity']} | `{w['rule']}` | {', '.join(map(str, w['columns']))} | "
+                   f"{w['message']} | {w['suggestion']} |")
     return "\n".join(out) + "\n"
 
 
-def _meta_block(meta: dict, r0: EvalResult | None) -> str:
-    lab = meta.get("labels") or {}
-    eng = meta.get("engineering") or {}
-    rows = ["| 项 | 值 |", "|---|---|"]
-    rows.append(f"| 数据来源 | {meta.get('source', '合成数据')} |")
-    rows.append(f"| 样本量 | {meta.get('rows', 0)}（训练 {r0.n_train if r0 else 0} / 测试 {r0.n_test if r0 else 0}） |")
-    rows.append(f"| 攻击样本 | 训练 {r0.attack_train if r0 else 0} / 测试 {r0.metrics.get('attack_support', 0) if r0 else 0} |")
-    rows.append(f"| 数据指纹 | `{r0.dataset_hash if r0 else ''}` |")
-    rows.append(f"| 切分方式 | {r0.split if r0 else ''} |")
-    rows.append(f"| 随机种子 | {r0.seed if r0 else 42} |")
-    rows.append(f"| 判定阈值 | {r0.threshold if r0 else 0.5} |")
-    if lab:
-        rows.append(f"| 标签对齐 | {lab.get('mode', 'n/a')}（{lab.get('labelled', 0)}/{lab.get('total', 0)}） |")
-    if lab.get("file"):
-        rows.append(f"| 标签文件 | `{lab['file']}` |")
-    if eng:
-        rows.append(f"| 速率兜底 | 最小时长 {eng.get('min_duration_ms')} ms |")
-        rows.append(f"| 派生特征 | {'、'.join(eng.get('derived', []))} |")
-    return "\n".join(rows) + "\n"
+def _model_table(v: ReportView) -> str:
+    head = "| 模型 | 类型 | AUC | F1 | 精确率 | 召回率 | 误报率 | 耗时 | TP | FP | FN | TN |"
+    sep = "|---|---|---|---|---|---|---|---|---|---|---|---|"
+    rows = [
+        f"| {m.model}{' 🏆' if m.is_best else ''} | {m.kind_cn} | {m.auc} | {m.f1} | {m.precision} | "
+        f"{m.recall} | {m.fpr} | {m.duration} | {m.tp} | {m.fp} | {m.fn} | {m.tn} |"
+        for m in v.models
+    ]
+    return "\n".join([head, sep, *rows])
 
 
-def _ablation_block(ablation: dict | None) -> str:
-    if not ablation:
+def _ablation_block(v: ReportView) -> str:
+    if not v.ablation:
         return ""
     rows = ["| 模型 | AUC（含该列） | AUC（去掉后） | Δ |", "|---|---|---|---|"]
-    for r in ablation.get("rows", []):
+    for r in v.ablation.get("rows", []):
         aw = "—" if r.get("auc_with") is None else f"{r['auc_with']:.4f}"
         ao = "—" if r.get("auc_without") is None else f"{r['auc_without']:.4f}"
         d = "—" if r.get("delta") is None else f"{r['delta']:+.4f}"
         rows.append(f"| {r['model']} | {aw} | {ao} | {d} |")
-    return (f"## 5. 消融：去掉 `{ablation.get('column')}`\n\n" + "\n".join(rows)
-            + f"\n\n> {ablation.get('note', '')}\n\n")
+    return ("## 05. 消融：去掉 `" + str(v.ablation.get("column")) + "`\n\n"
+            + "\n".join(rows) + f"\n\n> {v.ablation.get('note', '')}\n\n")
 
 
 def render_report(results: list[EvalResult], warns: list[dict], meta: dict,
                   ablation: dict | None = None) -> str:
-    r0 = results[0] if results else None
+    v = build_view(results, warns, meta, ablation)
+    n = 6 if ablation else 5
     lines = [
-        "# 流量异常检测实验报告",
-        "",
-        f"- 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "",
-        "## 1. 数据与配置",
-        "",
-        _meta_block(meta, r0),
-        "## 2. 数据泄漏检查",
-        "",
-        _warn_block(warns),
-        "## 3. 模型对比",
-        "",
-        markdown_table(results),
-        "",
-        "## 4. 混淆矩阵",
-        "",
-        "| 模型 | TN | FP | FN | TP |",
-        "|---|---|---|---|---|",
+        "# 流量异常检测实验报告", "",
+        f"- 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", "",
+        "## 1. 数据与配置", "", _meta_table(v), "",
+        "## 2. 数据泄漏检查", "", _warn_table(v.warnings),
+        "## 3. 模型对比", "", _model_table(v), "",
+        "## 4. 混淆矩阵", "",
+        "| 模型 | TN | FP | FN | TP |", "|---|---|---|---|---|",
     ]
-    for r in results:
-        c = r.confusion
-        lines.append(f"| {r.model} | {c['tn']} | {c['fp']} | {c['fn']} | {c['tp']} |")
-
-    if r0 and r0.n_test < 50:
+    lines += [f"| {m.model} | {m.tn} | {m.fp} | {m.fn} | {m.tp} |" for m in v.models]
+    if v.small_test:
         lines += ["", "> ⚠ 测试集不足 50 条，指标波动很大，不能当作结论。"]
-
-    lines += ["", _ablation_block(ablation).rstrip() or "", ""]
-
-    section = 6 if ablation else 5
-    lines += [f"## {section}. 复现方式", "", "```bash",
-              f"uv run flowlab demo --split {r0.split if r0 else 'temporal'} "
-              f"--seed {r0.seed if r0 else 42} --models {','.join(r.model for r in results)}",
-              "```", "",
+    lines += ["", _ablation_block(v).rstrip(), ""]
+    lines += [f"## {n}. 复现方式", "", "```bash",
+              f"uv run flowlab demo --split {v.split} --seed {v.seed} "
+              f"--models {','.join(m.model for m in v.models)}", "```", "",
               "> 同一个数据指纹 + 同样的切分与随机种子，结果应当逐位一致（浮点误差除外）。",
-              "", f"## {section + 1}. 模型参数", ""]
-    for r in results:
-        lines.append(f"- `{r.model}`（{r.kind}）：`{r.params}`")
+              "", f"## {n + 1}. 模型参数", ""]
+    lines += [f"- `{m.model}`：`{m.params}`" for m in v.models]
     return "\n".join(lines) + "\n"

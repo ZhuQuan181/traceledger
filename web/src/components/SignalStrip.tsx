@@ -31,12 +31,12 @@ export function SignalStrip({ curve, threshold }: { curve: Bucket[]; threshold: 
         </div>
       </div>
       <div className="signal-cap">
-        <span>测试集开头</span>
+        <span>窗口 1</span>
         <span>
-          <i className="legend-bar" aria-hidden="true" /> 柱高＝窗口最高分
-          <i className="legend-hit" aria-hidden="true" /> 红色＝窗口内有超阈值流（{hits}/{curve.length}）
+          <i className="legend-bar" aria-hidden="true" /> 柱高＝该窗最高分
+          <i className="legend-hit" aria-hidden="true" /> 红色＝窗内含超阈值流（{hits}/{curve.length}）
         </span>
-        <span>测试集结尾</span>
+        <span>窗口 {curve.length}</span>
       </div>
     </>
   );

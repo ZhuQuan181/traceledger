@@ -2,11 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchHistory, fetchModels, loadRun, runDemo, runUpload } from "./api";
 import type { ModelInfo, Payload, RunRow } from "./types";
 import { TopBar } from "./components/TopBar";
-import { Rail } from "./components/Rail";
-import { MetricsBand } from "./components/MetricsBand";
+import { ConfigRail } from "./components/ConfigRail";
+import { ContextPanel } from "./components/ContextPanel";
+import { MetricMatrix } from "./components/MetricMatrix";
 import { SignalStrip } from "./components/SignalStrip";
-import { LeakList } from "./components/LeakList";
-import { ModelTable } from "./components/ModelTable";
 import { AblationTable } from "./components/AblationTable";
 import { TopFlows } from "./components/TopFlows";
 
@@ -29,6 +28,7 @@ export default function App() {
   const [history, setHistory] = useState<RunRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     fetchModels().then(setModels).catch(() =>
@@ -45,11 +45,12 @@ export default function App() {
     return payload.results.reduce((a, b) => ((b.metrics.auc ?? 0) > (a.metrics.auc ?? 0) ? b : a));
   }, [payload]);
 
-  async function run() {
+  async function run(override?: { ablate?: string }) {
     setBusy(true);
     setError(null);
     try {
-      const params = { seed: 42, split, models: selected, threshold, ablate: ablate || null };
+      const ablateValue = override?.ablate ?? ablate;
+      const params = { seed: 42, split, models: selected, threshold, ablate: ablateValue || null };
       const data = source === "demo"
         ? await runDemo({ ...params, normal, attack, leaky })
         : await runUpload(file!, params, labelsFile, allowPickle);
@@ -89,18 +90,26 @@ export default function App() {
     URL.revokeObjectURL(a.href);
   }
 
-  const fmt = payload?.dataset.format;
+  async function copy() {
+    if (!payload) return;
+    await navigator.clipboard.writeText(payload.report_md);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  }
+
   const d = payload?.dataset;
+  const suspicious = Boolean(payload?.warnings.length) && (best?.metrics.auc ?? 0) >= 0.995;
+  const sectionNo = payload?.ablation ? { flow: "04" } : { flow: "03" };
 
   return (
     <div className="shell">
       <a className="skip" href="#main">跳到主要内容</a>
-      <TopBar payload={payload} busy={busy}
-              onDownloadMd={() => payload && save(payload.report_md, "text/markdown", "md")}
+      <TopBar payload={payload} busy={busy} runs={history} activeRun={payload?.run_id}
+              onOpenRun={openRun}
               onDownloadHtml={() => payload && save(payload.report_html, "text/html", "html")} />
 
-      <div className="body">
-        <Rail
+      <div className="workspace">
+        <ConfigRail
           models={models} selected={selected} onToggleModel={toggleModel}
           source={source} onSource={(s) => { setSource(s); setError(null); setFile(null); setLabelsFile(null); }}
           normal={normal} attack={attack} onNormal={setNormal} onAttack={setAttack}
@@ -111,11 +120,10 @@ export default function App() {
           file={file} onFile={setFile}
           labelsFile={labelsFile} onLabelsFile={setLabelsFile}
           allowPickle={allowPickle} onAllowPickle={setAllowPickle}
-          history={history} activeRun={payload?.run_id} onOpenRun={openRun}
-          busy={busy} onRun={run} error={error}
+          busy={busy} onRun={() => run()} error={error}
         />
 
-        <main className="doc" id="main">
+        <main className="canvas" id="main">
           {!payload && !busy && (
             <section className="intro">
               <h1>先跑一次，<br />再谈模型。</h1>
@@ -130,91 +138,108 @@ export default function App() {
                 <li>多个模型共用同一份特征矩阵，指标才真的可比。</li>
               </ol>
               <div className="intro-actions">
-                <button className="ghost-btn solid intro-run" onClick={run}
+                <button className="ghost-btn solid intro-run" onClick={() => run()}
                         disabled={busy || selected.length === 0}>用当前配置跑一次</button>
-                {history.length > 0 && (
-                  <span className="hint">或从左侧「历史」打开上一次实验</span>
-                )}
+                {history.length > 0 && <span className="hint">或点顶部的历史实验</span>}
               </div>
             </section>
           )}
 
-          {payload && d && (
+          {payload && d && best && (
             <>
-              <header className="doc-head">
-                <span className="kicker">
-                  RUN {payload.run_id ?? "—"} · {fmt?.format ?? "data"} · 指纹 {d.hash}
-                </span>
+              <header className="head">
+                <div className="head-kicker">
+                  RUN {payload.run_id ?? "—"} <span className="dot-sep">·</span> {d.format?.format ?? "data"}{" "}
+                  <span className="dot-sep">·</span> 指纹 {d.hash}
+                </div>
                 <h1>{d.source.replace(/（.*?）/g, "")}</h1>
-                <p className="sub">
-                  {d.rows.toLocaleString()} 条流<span className="sep">/</span>
-                  训练 {d.train.toLocaleString()} · 测试 {d.test.toLocaleString()}<span className="sep">/</span>
-                  {d.split === "temporal" ? "时间切分" : "随机切分"}<span className="sep">/</span>
+                <p className="head-sub">
+                  {d.rows.toLocaleString()} 条流 <span className="dot-sep">/</span> 训练 {d.train.toLocaleString()}{" "}
+                  · 测试 {d.test.toLocaleString()} <span className="dot-sep">/</span>{" "}
+                  {d.split === "temporal" ? "时间切分" : "随机切分"} <span className="dot-sep">/</span>{" "}
                   阈值 {d.threshold.toFixed(2)}
-                  {d.attack_test != null && <><span className="sep">/</span>测试集攻击 {d.attack_test} 条</>}
                 </p>
+
+                <div className="verdict">
+                  <div className="v-item">
+                    <span className="v-k">最佳模型</span>
+                    <span className="v-v mono">{best.model}</span>
+                  </div>
+                  <div className="v-item">
+                    <span className="v-k">AUC</span>
+                    <span className={`v-v ${suspicious ? "caution" : ""}`}>
+                      {best.metrics.auc == null ? "—" : best.metrics.auc.toFixed(4)}
+                      {suspicious && <span className="v-flag">待复核</span>}
+                    </span>
+                  </div>
+                  <div className="v-item">
+                    <span className="v-k">F1</span>
+                    <span className="v-v">{best.metrics.f1.toFixed(4)}</span>
+                  </div>
+                  <div className="v-item">
+                    <span className="v-k">误报率</span>
+                    <span className="v-v mono">
+                      {best.metrics.fpr == null ? "—" : `${(best.metrics.fpr * 100).toFixed(2)}%`}
+                    </span>
+                  </div>
+                  <div className="v-note">
+                    {suspicious
+                      ? `AUC 接近满分且存在 ${payload.warnings.length} 条泄漏 — 先看右侧检查结果。`
+                      : best.kind === "supervised" ? "监督模型，使用训练集标签" : "无监督基线，不使用标签"}
+                  </div>
+                </div>
               </header>
 
-              <MetricsBand payload={payload} best={best} />
-
-              {payload.warnings.length > 0 && (
-                <p className="riskline">
-                  <span className="risk-tag">{payload.warnings.length} 条泄漏</span>
-                  <span><b>{payload.warnings[0].rule}</b>：{payload.warnings[0].message}</span>
-                  <a href="#leaks">看明细</a>
-                </p>
-              )}
-
-              <section className="section">
-                <header>
-                  <h2><span className="idx">01</span>测试集分数分布</h2>
-                  <span className="aside">按时间顺序 · 每窗最高分</span>
+              <section className="block">
+                <header className="block-head">
+                  <h2><span className="idx">01</span>模型对比</h2>
+                  <span className="aside">按 AUC 排序 · 同一份特征矩阵</span>
                 </header>
-                <SignalStrip curve={best?.score_curve ?? payload.score_curve ?? []} threshold={d.threshold} />
+                <MetricMatrix results={payload.results} bestModel={payload.best_model} />
               </section>
 
-              <section className="section" id="leaks">
-                <header>
-                  <h2><span className="idx">02</span>数据泄漏检查</h2>
-                  <span className="aside">{payload.warnings.length} 条</span>
+              <section className="block">
+                <header className="block-head">
+                  <h2><span className="idx">02</span>分数峰值随时间</h2>
+                  <span className="aside">柱高＝窗口最高分 · 红条＝窗口内含超阈值流</span>
                 </header>
-                <LeakList warnings={payload.warnings} />
-              </section>
-
-              <section className="section">
-                <header>
-                  <h2><span className="idx">03</span>模型对比</h2>
-                  <span className="aside">{payload.results.length} 个模型 · 同一份特征矩阵 · 右侧为混淆矩阵 TP/FP/FN/TN</span>
-                </header>
-                <ModelTable results={payload.results} bestModel={payload.best_model} />
+                <SignalStrip curve={best.score_curve ?? payload.score_curve ?? []} threshold={d.threshold} />
               </section>
 
               {payload.ablation && (
-                <section className="section">
-                  <header>
-                    <h2><span className="idx">04</span>消融：去掉 {payload.ablation.column}</h2>
+                <section className="block">
+                  <header className="block-head">
+                    <h2><span className="idx">03</span>消融：去掉 {payload.ablation.column}</h2>
                     <span className="aside">Δ 为正 = 指标靠这一列撑着</span>
                   </header>
                   <AblationTable ablation={payload.ablation} />
                 </section>
               )}
 
-              <section className="section">
-                <header>
-                  <h2><span className="idx">{payload.ablation ? "05" : "04"}</span>最可疑的流</h2>
-                  <span className="aside">{payload.best_model} 打分 · 前 15 条</span>
+              <section className="block">
+                <header className="block-head">
+                  <h2><span className="idx">{sectionNo.flow}</span>最可疑的流</h2>
+                  <span className="aside">{best.model} 打分 · 前 15 条</span>
                 </header>
-                <TopFlows flows={payload.top_flows} model={payload.best_model} />
+                <TopFlows flows={payload.top_flows}
+                          leakPort={(payload.warnings.find((w) => w.rule === "port_leak")?.value) ?? null} />
               </section>
 
-              <div className="footnote">
-                {d.labels?.mode && `标签对齐 ${d.labels.mode}（${d.labels.labelled ?? 0}/${d.labels.total ?? 0}） · `}
-                速率兜底 {d.engineering?.min_duration_ms ?? 1} ms · 随机种子 {d.seed ?? 42} ·
-                报告自包含，可离线归档
-              </div>
+              <p className="footnote">
+                标签对齐 {d.labels?.mode ?? "—"}（{d.labels?.labelled ?? 0}/{d.labels?.total ?? 0}） · 速率兜底{" "}
+                {d.engineering?.min_duration_ms ?? 1} ms · 随机种子 {d.seed ?? 42} · 报告自包含，可离线归档
+              </p>
             </>
           )}
         </main>
+
+        <ContextPanel
+          payload={payload}
+          onCopy={copy}
+          onDownloadMd={() => payload && save(payload.report_md, "text/markdown", "md")}
+          onRerunWithout={(col) => { setAblate(col); run({ ablate: col }); }}
+          copied={copied}
+        />
       </div>
     </div>
   );

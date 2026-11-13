@@ -68,6 +68,7 @@ def detect(df: pd.DataFrame, split: str = "temporal", label_col: str = "label") 
                     {
                         "rule": "port_leak",
                         "columns": ["dst_port"],
+                        "value": int(share.index[0]),
                         "severity": "medium",
                         "message": f"类别 {cls} 中有 {share.iloc[0]:.1%} 的流目的端口是 {share.index[0]}。",
                         "suggestion": "先确认这是业务特征还是数据集构造痕迹；若为构造痕迹，去掉端口列重跑对比。",

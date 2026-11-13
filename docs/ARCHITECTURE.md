@@ -54,6 +54,7 @@
 | `eval/runner.py` | 一次实验的循环（多模型共用矩阵） | 报告格式 |
 | `eval/ablation.py` | 去掉一列重跑并对比 | 决定该列该不该留 |
 | `models/` | 插件注册与三个内置模型 | 特征工程 |
+| `report/view.py` | 把结果压成"可直接排版"的视图 | 排版细节 |
 | `report/` | Markdown / 单文件 HTML | 实验逻辑 |
 | `payload.py` | 统一输出结构（CLI/API/存储共用） | 计算 |
 | `store.py` | SQLite 历史 | 报告内容 |
@@ -127,14 +128,21 @@ dataset_hash / n_train / n_test / threshold / seed / attack_train / top_flows / 
 |---|---|---|
 | CLI 和 API 各写一遍"跑实验 + 消融 + 报告" | 统一走 `service.execute()` | 两条路径必然漂移 |
 | 只有 CSV/pcap | `ingest/` 按格式分发 + `adapters/` 处理形状 | 用户数据格式千奇百怪 |
-| `prepare.py` 里三份几乎相同的预处理构造 | 仍是三处，但共用 `CATEGORICAL_FORCE` 与同一个 pipeline 结构 | 待收敛（见债务） |
-| payload 组装散在 API 里 | `payload.py` 单一来源 | CLI/API/历史一致 |
-| 前端组件与样式耦合 | 设计 token 集中在 `styles.css` 顶部 | 换肤只改一处 |
+| `prepare.py` 三份几乎相同的预处理构造 | 一个 `_make_preprocessor()` + 三个 4 行的公开函数 | 之前靠复制粘贴维护 |
+| 报告两个渲染器各自推导"哪个模型最好/小数几位" | `report/view.py` 的 `ReportView` 是唯一来源 | 会出现"网页有、报告没有" |
+| 历史库只增不减 | `store.prune(keep)` + `flowlab history --prune` + `DELETE /api/history` | 跑久了会撑爆 |
+| 前端三栏比例固定、信息堆在一条长列 | 三栏实验台：配置 / 画布 / 上下文（含可执行建议） | 看结果时不用来回滚动 |
+| 输出 payload 由 API 手拼 | `payload.py` 单一来源 | CLI/API/历史一致 |
 
-## 七、已知债务
+## 七、已清掉的债务（v0.5）
 
-1. `prepare.py` 的 `build_matrix / build_matrix_pair / build_feature_matrix` 仍有三份相似代码，
-   应抽出 `_make_column_transformer()`；暂不动是因为每条路径的丢弃规则略有差异，先靠测试锁住行为。
-2. `report/markdown.py` 与 `report/html.py` 有重复的字段拼装，可抽 `report/model.py` 做中间视图。
-3. `store.py` 存整份 payload，历史库会随报告变长而变大；v0.5 考虑只存结果 + 报告按需重建。
-4. 泄漏规则是硬编码顺序，规则多起来应改成注册表 + 可开关。
+1. ✅ `prepare.py`：三份预处理合成 `_features()` + `_make_preprocessor()`，
+   三个公开函数各 4–6 行，行为由原测试锁住。
+2. ✅ 报告：新增 `report/view.py::ReportView`，Markdown 与 HTML 只做排版，不再各算一遍。
+3. ✅ 历史库：`store.prune(keep)`，CLI `history --prune N`，API `DELETE /api/history?keep=N`。
+
+## 八、剩余债务
+
+1. `store.py` 存整份 payload，历史库会随报告变长而变大；可只存结果 + 报告按需重建。
+2. 泄漏规则是硬编码顺序，规则多起来应改成注册表 + 可开关。
+3. 前端 `styles.css` 仍是单文件（21 KB），组件多起来需要按层拆成 `tokens/layout/components`。

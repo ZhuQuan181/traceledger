@@ -3,7 +3,7 @@
 > 工作名（占位，可改）。一句话：**把网络流量异常检测的研究模型，变成能跑、能复现、能解释的系统。**
 
 - 创建：2026-11-11
-- 状态：**v0.4**（2026-11-13：多格式输入 + 界面重做 + 架构收敛；61 个测试）
+- 状态：**v0.5**（2026-11-13：三栏工作台 + 8 种数据格式 + 债务清理；61 个测试）
 - 负责人：zq（实现由 Hermes 完成）
 - 文档语言：中文；代码与接口用英文
 
@@ -39,6 +39,7 @@ pcap 需要本机 `tshark`（Ubuntu: `sudo apt install tshark`）。
 | `flowlab formats` | 列出支持的数据格式 |
 | `flowlab models` | 列出已注册模型 |
 | `flowlab history` | 最近的实验（本地 SQLite，`~/.flowlab/flowlab.db`） |
+| `flowlab history --prune 20` | 只保留最近 20 条，其余删除 |
 | `flowlab show ID` | 回看某次实验，可导出 MD / HTML |
 | `flowlab compare ID1 ID2` | 跨实验对比最佳指标 |
 

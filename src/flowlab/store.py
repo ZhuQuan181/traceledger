@@ -102,3 +102,22 @@ def compare(run_ids: list[str]) -> list[dict]:
         if r:
             rows.append(r)
     return rows
+
+
+def count() -> int:
+    with connect() as conn:
+        return int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
+
+
+def prune(keep: int = 50) -> int:
+    """只保留最近 keep 条，返回删除条数。"""
+    if keep < 1:
+        raise ValueError("keep 至少为 1（想清空请用 keep=1 并自行触发）")
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id FROM runs ORDER BY created_at DESC LIMIT -1 OFFSET ?", (keep,)
+        ).fetchall()
+        ids = [(r["id"],) for r in rows]
+        if ids:
+            conn.executemany("DELETE FROM runs WHERE id = ?", ids)
+    return len(ids)
