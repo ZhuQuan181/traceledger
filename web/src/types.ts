@@ -53,6 +53,8 @@ export type Payload = {
     hash: string;
     split: string;
     threshold: number;
+    labels?: { mode?: string; labelled?: number; total?: number; file?: string };
+    engineering?: { min_duration_ms?: number; derived?: string[]; note?: string };
   };
   warnings: Warning[];
   results: Result[];

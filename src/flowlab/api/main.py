@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from flowlab.eval.runner import run_experiment
+from flowlab.pipeline import load_frame
 from flowlab.models.registry import available
 from flowlab.report.markdown import render_report
 from flowlab.schema import normalize_columns
@@ -35,7 +36,7 @@ class DemoRequest(BaseModel):
     explain: bool = True
 
 
-def _payload(df, results, warns, source: str) -> dict:
+def _payload(df, results, warns, source: str, meta: dict | None = None) -> dict:
     best = max(results, key=lambda r: (r.metrics.get("auc") or 0)) if results else None
     r0 = results[0] if results else None
     return {
@@ -47,12 +48,14 @@ def _payload(df, results, warns, source: str) -> dict:
             "hash": r0.dataset_hash if r0 else "",
             "split": r0.split if r0 else "",
             "threshold": r0.threshold if r0 else 0.5,
+            "labels": (meta or {}).get("labels", {}),
+            "engineering": (meta or {}).get("engineering", {}),
         },
         "warnings": warns,
         "results": [r.to_dict() for r in results],
         "best_model": best.model if best else None,
         "top_flows": best.top_flows if best else [],
-        "report_md": render_report(results, warns, {"source": source, "rows": len(df)}),
+        "report_md": render_report(results, warns, {"source": source, "rows": len(df), **(meta or {})}),
     }
 
 
@@ -83,9 +86,9 @@ def demo(req: DemoRequest):
 
 
 @app.post("/api/upload")
-async def upload(file: UploadFile = File(...), split: str = Form("temporal"),
-                 models: str = Form("mlp,iforest,autoencoder"), threshold: float = Form(0.5),
-                 seed: int = Form(42)):
+async def upload(file: UploadFile = File(...), labels: UploadFile | None = File(None),
+                 split: str = Form("temporal"), models: str = Form("mlp,iforest,autoencoder"),
+                 threshold: float = Form(0.5), seed: int = Form(42)):
     name = file.filename or "upload"
     suffix = Path(name).suffix.lower()
     data = await file.read()
@@ -94,24 +97,30 @@ async def upload(file: UploadFile = File(...), split: str = Form("temporal"),
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / f"upload{suffix or '.csv'}"
         p.write_bytes(data)
+        lab_path = None
+        if labels is not None:
+            lab_data = await labels.read()
+            if lab_data:
+                lab_path = Path(td) / "labels.csv"
+                lab_path.write_bytes(lab_data)
         try:
-            if suffix in {".pcap", ".pcapng"}:
-                from flowlab.ingest.pcap import PcapUnavailable, read_pcap
-                try:
-                    df = read_pcap(p)
-                except PcapUnavailable as exc:
-                    raise HTTPException(400, str(exc)) from exc
-                if "label" not in df.columns:
-                    raise HTTPException(
-                        400,
-                        "pcap 没有标签列，无法做监督评估。请在 CSV 里补 label 列，"
-                        "或使用 CLI 的 score 子命令做无监督排序。",
-                    )
-            else:
-                from flowlab.ingest.csv import read_csv
-                df = read_csv(p)
+            from flowlab.ingest.pcap import PcapUnavailable
+            try:
+                loaded = load_frame(p, lab_path)
+            except PcapUnavailable as exc:
+                raise HTTPException(400, str(exc)) from exc
+            df, meta = loaded.df, loaded.meta()
+            if labels is not None and meta.get("labels", {}).get("file"):
+                meta["labels"]["file"] = labels.filename  # 不要在报告里泄漏临时目录
         except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(400, str(exc)) from exc
+
+        if "label" not in df.columns:
+            raise HTTPException(
+                400,
+                "这份数据没有标签列，无法算 AUC/F1。pcap 请同时上传标签 CSV（五元组或 flow_id 对齐），"
+                "或者用 CLI 的 score 子命令做无监督排序。",
+            )
 
     mlist = [m.strip() for m in models.split(",") if m.strip()]
     try:
@@ -119,7 +128,7 @@ async def upload(file: UploadFile = File(...), split: str = Form("temporal"),
                                         threshold=threshold, explain=True)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return _payload(df, results, warns, name)
+    return _payload(df, results, warns, name, meta)
 
 
 @app.post("/api/report", response_class=PlainTextResponse)

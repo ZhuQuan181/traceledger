@@ -33,9 +33,14 @@ export async function runDemo(p: DemoParams): Promise<Payload> {
   return json<Payload>(res);
 }
 
-export async function runUpload(file: File, p: Omit<DemoParams, "normal" | "attack">): Promise<Payload> {
+export async function runUpload(
+  file: File,
+  p: Omit<DemoParams, "normal" | "attack">,
+  labels?: File | null
+): Promise<Payload> {
   const form = new FormData();
   form.append("file", file);
+  if (labels) form.append("labels", labels);
   form.append("split", p.split);
   form.append("models", p.models.join(","));
   form.append("threshold", String(p.threshold));

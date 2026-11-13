@@ -7,7 +7,7 @@ export function SignalStrip({ curve, threshold }: { curve: Bucket[]; threshold: 
     <section className="panel signal-panel">
       <div className="panel-head">
         <h2>测试集分数分布</h2>
-        <span className="mono dim">{hits} / {curve.length} 段超过阈值</span>
+        <span className="mono dim">{hits} / {curve.length} 个时间窗超阈值</span>
       </div>
       <div className="signal" role="img" aria-label={`按时间顺序的异常分数分布，共 ${curve.length} 段，${hits} 段超过阈值`}>
         <div className="signal-y" aria-hidden="true">

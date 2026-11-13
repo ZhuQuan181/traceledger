@@ -16,6 +16,8 @@ type Props = {
   onThreshold: (t: number) => void;
   file: File | null;
   onFile: (f: File | null) => void;
+  labelsFile: File | null;
+  onLabelsFile: (f: File | null) => void;
   busy: boolean;
   onRun: () => void;
   error: string | null;
@@ -54,12 +56,20 @@ export function ControlPanel(p: Props) {
             </label>
           </div>
         ) : (
-          <label className={`drop ${p.file ? "filled" : ""}`}>
-            <input type="file" name="flow-file" accept=".csv,.pcap,.pcapng"
-                   onChange={(e) => p.onFile(e.target.files?.[0] ?? null)} />
-            <strong>{p.file ? p.file.name : "选择 CSV 或 pcap"}</strong>
-            <span>{p.file ? `${(p.file.size / 1024).toFixed(0)} KB` : "pcap 需要本机安装 tshark；无标签时请用命令行 score"}</span>
-          </label>
+          <>
+            <label className={`drop ${p.file ? "filled" : ""}`}>
+              <input type="file" name="flow-file" accept=".csv,.pcap,.pcapng"
+                     onChange={(e) => p.onFile(e.target.files?.[0] ?? null)} />
+              <strong>{p.file ? p.file.name : "选择 CSV 或 pcap"}</strong>
+              <span>{p.file ? `${(p.file.size / 1024).toFixed(0)} KB` : "CSV 需带 label 列；pcap 需另附标签"}</span>
+            </label>
+            <label className={`drop compact ${p.labelsFile ? "filled" : ""}`}>
+              <input type="file" name="labels-file" accept=".csv"
+                     onChange={(e) => p.onLabelsFile(e.target.files?.[0] ?? null)} />
+              <strong>{p.labelsFile ? p.labelsFile.name : "标签 CSV（可选）"}</strong>
+              <span>五元组或 flow_id 对齐；也可命名成 xxx.labels.csv 自动加载</span>
+            </label>
+          </>
         )}
       </section>
 

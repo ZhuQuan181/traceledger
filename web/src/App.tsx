@@ -19,6 +19,7 @@ export default function App() {
   const [split, setSplit] = useState<"temporal" | "random">("temporal");
   const [threshold, setThreshold] = useState(0.5);
   const [file, setFile] = useState<File | null>(null);
+  const [labelsFile, setLabelsFile] = useState<File | null>(null);
   const [payload, setPayload] = useState<Payload | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +41,7 @@ export default function App() {
       const params = { seed: 42, split, models: selected, threshold };
       const data = source === "demo"
         ? await runDemo({ ...params, normal, attack })
-        : await runUpload(file!, params);
+        : await runUpload(file!, params, labelsFile);
       setPayload(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -81,7 +82,7 @@ export default function App() {
           selected={selected}
           onToggleModel={toggleModel}
           source={source}
-          onSource={(s) => { setSource(s); setError(null); }}
+          onSource={(s) => { setSource(s); setError(null); setFile(null); setLabelsFile(null); }}
           normal={normal}
           attack={attack}
           onNormal={setNormal}
@@ -92,6 +93,8 @@ export default function App() {
           onThreshold={setThreshold}
           file={file}
           onFile={setFile}
+          labelsFile={labelsFile}
+          onLabelsFile={setLabelsFile}
           busy={busy}
           onRun={run}
           error={error}
@@ -124,6 +127,13 @@ export default function App() {
                   {payload.dataset.train.toLocaleString()} / 测试 {payload.dataset.test.toLocaleString()} ·{" "}
                   {payload.dataset.split === "temporal" ? "时间切分" : "随机切分"} · 阈值{" "}
                   {payload.dataset.threshold.toFixed(2)}
+                  {payload.dataset.labels?.mode && (
+                    <span className="dim"> · 标签对齐 {payload.dataset.labels.mode}
+                      （{payload.dataset.labels.labelled}/{payload.dataset.labels.total}）</span>
+                  )}
+                  {payload.dataset.engineering?.min_duration_ms && (
+                    <span className="dim"> · 速率兜底 {payload.dataset.engineering.min_duration_ms} ms</span>
+                  )}
                 </p>
                 <div className="actions">
                   <button onClick={copy}>{copied ? "已复制" : "复制 Markdown"}</button>

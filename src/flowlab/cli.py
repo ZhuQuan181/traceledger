@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from flowlab.eval.runner import run_experiment
+from flowlab.pipeline import load_frame
 from flowlab.eval.table import as_json, markdown_table
 from flowlab.features.leakage import summarize
 from flowlab.report.markdown import render_report
@@ -32,12 +33,14 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--seed", type=int, default=42)
     r.add_argument("--json", action="store_true")
     r.add_argument("--report", type=Path)
+    r.add_argument("--labels", type=Path, help="旁挂标签 CSV（pcap 没有标签时用）")
 
     s = sub.add_parser("score", help="对无标签数据（如 pcap）打分，输出最可疑的流")
     s.add_argument("file", type=Path)
     s.add_argument("--model", default="iforest")
     s.add_argument("--top", type=int, default=20)
     s.add_argument("--json", action="store_true")
+    s.add_argument("--labels", type=Path, help="旁挂标签 CSV（可选，仅用于展示真实标签）")
 
     sv = sub.add_parser("serve", help="启动本地 Web 界面")
     sv.add_argument("--host", default="127.0.0.1")
@@ -47,15 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _load(path: Path):
-    from flowlab.ingest.csv import read_csv
-    if path.suffix.lower() in {".pcap", ".pcapng"}:
-        from flowlab.ingest.pcap import read_pcap
-        return read_pcap(path)
-    return read_csv(path)
+def _load(path: Path, labels: Path | None = None):
+    return load_frame(path, labels)
 
 
-def _emit(results, warns, args, source: str, rows: int) -> int:
+def _emit(results, warns, args, source: str, rows: int, meta: dict | None = None) -> int:
     if args.json:
         print(as_json(results))
     else:
@@ -66,7 +65,10 @@ def _emit(results, warns, args, source: str, rows: int) -> int:
         print(markdown_table(results))
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(render_report(results, warns, {"source": source, "rows": rows}),
+        report_meta = {"source": source, "rows": rows, **(meta or {})}
+        if results:
+            report_meta["attack_support"] = results[0].metrics.get("attack_support")
+        args.report.write_text(render_report(results, warns, report_meta),
                                encoding="utf-8")
         print(f"\n报告已写入 {args.report}", file=sys.stderr if args.json else sys.stdout)
     return 0
@@ -96,7 +98,8 @@ def main(argv: list[str] | None = None) -> int:
         if not args.file.exists():
             print(f"文件不存在: {args.file}", file=sys.stderr)
             return 2
-        df = _load(args.file)
+        loaded = _load(args.file, getattr(args, "labels", None))
+        df = loaded.df
         X, feats = build_feature_matrix(df)
         det = create(args.model)
         det.fit(X, None)
@@ -111,20 +114,25 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(top[show + ["score"]].round(4).to_dict("records"), ensure_ascii=False, indent=2))
         else:
             print(f"== Top {len(top)} 可疑流（模型 {args.model}，共 {len(view)} 条）==")
+            if loaded.label_info:
+                print(f"   标签对齐: {loaded.label_info}")
             print(top[show + ["score"]].round(4).to_string(index=False))
         return 0
 
     if args.cmd == "demo":
         from flowlab.synthetic import generate
-        df = normalize_columns(generate(n_normal=args.normal, n_attack=args.attack, seed=args.seed))
+        from flowlab.engineer import add_engineered_features, describe
+        df = add_engineered_features(
+            normalize_columns(generate(n_normal=args.normal, n_attack=args.attack, seed=args.seed)))
         source = "合成数据（synthetic.py）"
+        meta = {"engineering": describe(), "labels": {"mode": "embedded"}}
     else:
         if not args.file.exists():
             print(f"文件不存在: {args.file}", file=sys.stderr)
             return 2
-        df = _load(args.file)
-        source = str(args.file)
+        loaded = _load(args.file, getattr(args, "labels", None))
+        df, source, meta = loaded.df, loaded.source, loaded.meta()
 
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     results, warns = run_experiment(df, models=models, split=args.split, seed=args.seed)
-    return _emit(results, warns, args, source, len(df))
+    return _emit(results, warns, args, source, len(df), meta)

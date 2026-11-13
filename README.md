@@ -3,7 +3,7 @@
 > 工作名（占位，可改）。一句话：**把网络流量异常检测的研究模型，变成能跑、能复现、能解释的系统。**
 
 - 创建：2026-11-11
-- 状态：**M1 完成**（2026-11-13，代码可跑：CLI + API + Web 界面 + 30 个测试）
+- 状态：**M2 / v0.2 完成**（2026-11-13：CLI + API + Web + pcap 旁挂标签 + 39 个测试）
 - 负责人：zq（实现由 Hermes 完成）
 - 文档语言：中文；代码与接口用英文
 
@@ -16,6 +16,8 @@ uv sync --extra dev --extra api
 uv run flowlab demo                        # 合成数据跑一次
 uv run flowlab demo --report out/report.md # 同时生成报告
 uv run flowlab run my.csv --split temporal # 跑自己的 CSV（需要 label 列）
+uv run flowlab run cap.pcap                # pcap + 同名 cap.pcap.labels.csv 自动对齐
+uv run flowlab run cap.pcap --labels l.csv # 或显式指定标签文件
 uv run flowlab score cap.pcap --top 20     # pcap 只打分（无标签）
 uv run flowlab serve                       # Web 界面 127.0.0.1:8765
 cd web && npm install && npm run build     # 改前端后重新构建
@@ -30,6 +32,7 @@ pcap 需要本机 `tshark`（Ubuntu: `sudo apt install tshark`）。
 | `flowlab demo` | 合成数据跑全流程（默认 5000 正常 + 500 攻击） |
 | `flowlab run FILE` | 对 CSV/pcap 跑实验，要求有 `label` 列 |
 | `flowlab score FILE` | 无标签数据的无监督排序，输出最可疑的流 |
+| `flowlab run FILE --labels L` | pcap 旁挂标签（flow_id / 五元组 / 行序三种对齐） |
 | `flowlab serve` | 本地 Web 工作台 |
 | `flowlab models` | 列出已注册模型 |
 
@@ -44,6 +47,12 @@ CSV / pcap
    ↓ models        registry 插件（mlp / iforest / autoencoder / 你的）
    ↓ eval          时间/随机切分 → AUC·F1·FPR·混淆矩阵
    ↓ report/api    Markdown 报告 + FastAPI + React 界面
+```
+
+加载管线（CLI 与 API 共用）：
+
+```
+读文件 → 列名标准化 → 旁挂标签（可选）→ 特征工程（速率兜底 1ms、bytes_per_pkt）
 ```
 
 新增模型只要一个文件，放进 `src/flowlab/models/` 就会被自动发现：
