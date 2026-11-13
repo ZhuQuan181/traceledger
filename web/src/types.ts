@@ -71,8 +71,18 @@ export type Ablation = {
   note: string;
 };
 
+export type VerdictCheck = { name: string; status: "pass" | "warn" | "fail"; detail: string };
+
+export type Verdict = {
+  level: "ok" | "warn" | "fail";
+  headline: string;
+  reasons: string[];
+  checks: VerdictCheck[];
+};
+
 export type Payload = {
   dataset: Dataset;
+  verdict?: Verdict;
   warnings: Warning[];
   results: Result[];
   best_model: string | null;

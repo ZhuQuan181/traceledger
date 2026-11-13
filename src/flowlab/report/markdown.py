@@ -71,6 +71,31 @@ def _ablation_block(v: ReportView) -> str:
             + "\n".join(rows) + f"\n\n> {v.ablation.get('note', '')}\n\n")
 
 
+def _verdict_block(v: ReportView) -> str:
+    """结论区块：放最前面，回答"这组数字能不能用"。"""
+    vd = v.verdict or {}
+    if not vd:
+        return ""
+    icon = {"ok": "✅", "warn": "⚠️", "fail": "⛔"}.get(vd.get("level", ""), "•")
+    out = [f"## 0. 结论", "", f"### {icon} {vd.get('headline', '')}", ""]
+    checks = vd.get("checks") or []
+    if checks:
+        out += ["| 检查项 | 结果 | 说明 |", "|---|---|---|"]
+        mark = {"pass": "通过", "warn": "注意", "fail": "不通过"}
+        for c in checks:
+            out.append(f"| {c['name']} | {mark.get(c['status'], c['status'])} | {c['detail']} |")
+        out.append("")
+    reasons = vd.get("reasons") or []
+    if reasons:
+        shown = {c["detail"] for c in checks}
+        extra = [r for r in reasons if r not in shown]
+        if extra:
+            out += ["> 另需注意：" + "；".join(extra), ""]
+    out += ["> 判断依据：CICIDS 类数据集上的常见区间（AUC 0.93–0.99、误报率 0.5%–8%）。"
+            "只用于发现异常，不是评分标准。", ""]
+    return "\n".join(out)
+
+
 def render_report(results: list[EvalResult], warns: list[dict], meta: dict,
                   ablation: dict | None = None) -> str:
     v = build_view(results, warns, meta, ablation)
@@ -78,6 +103,7 @@ def render_report(results: list[EvalResult], warns: list[dict], meta: dict,
     lines = [
         "# 流量异常检测实验报告", "",
         f"- 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", "",
+        _verdict_block(v),
         "## 1. 数据与配置", "", _meta_table(v), "", _classes_line(v), _features_line(v),
         "## 2. 数据泄漏检查", "", _warn_table(v.warnings),
         "## 3. 模型对比", "", _model_table(v), "",

@@ -72,6 +72,7 @@ class ReportView:
     classes: list[dict] = field(default_factory=list)
     features: list[str] = field(default_factory=list)
     encoded_features: int = 0
+    verdict: dict = field(default_factory=dict)
 
     @property
     def top_warning(self) -> dict | None:
@@ -145,4 +146,5 @@ def build_view(results: list[EvalResult], warns: list[dict], meta: dict,
         classes=meta.get("classes") or [],
         features=(meta.get("features") or {}).get("used") or [],
         encoded_features=(meta.get("features") or {}).get("encoded") or 0,
+        verdict=meta.get("verdict") or {},
     )

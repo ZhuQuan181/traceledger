@@ -35,6 +35,25 @@ border-bottom:1px solid var(--rule);margin:22px 0 0}
 background:rgba(164,38,44,.045);font-size:13px;display:flex;gap:10px;align-items:baseline}
 .risk .tag{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--alert)}
 .risk .more{margin-left:auto;font-size:11.5px;color:var(--muted)}
+.verdict{margin:18px 0 4px;padding:16px 18px;border:1px solid var(--rule);
+border-left:3px solid var(--ok);background:#f7faf8}
+.verdict.warn{border-left-color:var(--amber);background:#fdfaf3}
+.verdict.fail{border-left-color:var(--alert);background:#fdf6f6}
+.verdict .vh{margin:0 0 10px;font-size:15px;font-weight:500;line-height:1.45}
+.verdict .vl{margin:0 0 4px;font-family:"IBM Plex Mono",monospace;font-size:11px;
+letter-spacing:.06em;color:var(--muted)}
+.verdict .vi{margin-right:8px}
+.verdict table.check{width:100%;border-collapse:collapse;font-size:12.5px}
+.verdict table.check th,.verdict table.check td{
+text-align:left;padding:6px 8px;border-bottom:1px solid rgba(0,0,0,.06)}
+.verdict table.check thead th{font-size:11px;color:var(--muted);font-weight:600}
+.verdict table.check tr:last-child th,.verdict table.check tr:last-child td{border-bottom:0}
+.verdict table.check th[scope=row]{width:88px;font-weight:500}
+.verdict table.check td.st{width:64px;font-size:11.5px}
+.verdict table.check tr.fail td.st{color:var(--alert);font-weight:600}
+.verdict table.check tr.warn td.st{color:var(--amber);font-weight:600}
+.verdict table.check tr.pass td.st{color:var(--ok)}
+.verdict .cap{margin-top:8px}
 table.data{width:100%;border-collapse:collapse;font-size:13px}
 table.data thead th{text-align:left;font-size:11.5px;font-weight:600;color:var(--ink2);
 padding:0 12px 9px;border-bottom:1px solid var(--rule2);white-space:nowrap}
@@ -55,6 +74,7 @@ font:10px/1 "IBM Plex Mono",monospace;color:var(--muted);padding-bottom:1px}
 .tick{flex:1;background:var(--navy);opacity:.32;border-radius:1px 1px 0 0}
 .hits{display:flex;gap:2px;height:5px;margin-top:0}
 .hits span{flex:1;background:var(--alert);border-radius:0 0 1px 1px}
+.tick.hit{background:var(--alert);opacity:.62}
 .thr{position:absolute;left:0;right:0;border-top:1px dashed var(--alert);opacity:.85}
 .thr span{position:absolute;right:6px;top:-16px;padding:1px 5px;background:var(--paper);
 font:10px/1 "IBM Plex Mono",monospace;color:var(--alert)}
@@ -84,13 +104,11 @@ def _e(v) -> str:
 def _signal(v: ReportView) -> str:
     if not v.curve:
         return ""
+    HIT = 0.2  # 与网页版一致：窗内 ≥20% 的流超阈值才算命中
+    hits_n = sum(1 for b in v.curve if b.get("h", 0) >= HIT)
     bars = "".join(
-        f'<span class="tick" style="height:{max(2, min(100, b.get("p", 0) * 100)):.1f}%"></span>'
-        for b in v.curve
-    )
-    hits = "".join(
-        f'<span style="opacity:{0.35 + 0.65 * min(1, b.get("h", 0) * 3):.2f}"></span>'
-        if b.get("h", 0) > 0 else '<span style="opacity:0"></span>'
+        f'<span class="tick{" hit" if b.get("h", 0) >= HIT else ""}" '
+        f'style="height:{max(2, min(100, b.get("p", 0) * 100)):.1f}%"></span>'
         for b in v.curve
     )
     threshold = float(v.threshold)
@@ -98,10 +116,10 @@ def _signal(v: ReportView) -> str:
         f'<div class="sigwrap"><div class="sigy"><span>1.0</span><span>0.5</span><span>0.0</span></div>'
         f'<div><div class="signal">{bars}'
         f'<div class="thr" style="bottom:{threshold * 100:.0f}%"><span>阈值 {threshold:.2f}</span></div>'
-        f'</div><div class="hits">{hits}</div></div></div>'
-        f'<div class="cap"><span>测试集开头</span>'
-        f'<span>柱高＝窗口最高分；红色短条＝该窗口含超阈值流</span>'
-        f'<span>测试集结尾</span></div>'
+        f'</div></div></div>'
+        f'<div class="cap"><span>窗口 1</span>'
+        f'<span>柱高＝该窗最高分；红色柱＝窗内 ≥20% 的流超阈值（{hits_n}/{len(v.curve)}）</span>'
+        f'<span>窗口 {len(v.curve)}</span></div>'
     )
 
 
@@ -184,6 +202,39 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
     small = ('<p class="cap">⚠ 测试集不足 50 条，指标波动很大，不能当作结论。</p>'
              if v.small_test else "")
 
+    def _verdict_box() -> str:
+        vd = v.verdict or {}
+        if not vd:
+            return ""
+        level = vd.get("level", "warn")
+        icon = {"ok": "✅", "warn": "⚠️", "fail": "⛔"}.get(level, "•")
+        label = {"ok": "可用", "warn": "需说明", "fail": "不可用"}.get(level, "")
+        mark = {"pass": "通过", "warn": "注意", "fail": "不通过"}
+        rows = "".join(
+            f'<tr class="{c["status"]}"><th scope="row">{_e(c["name"])}</th>'
+            f'<td class="st">{mark.get(c["status"], c["status"])}</td>'
+            f'<td>{_e(c["detail"])}</td></tr>'
+            for c in (vd.get("checks") or [])
+        )
+        table = (f'<table class="check"><thead><tr><th>检查项</th><th>结果</th><th>说明</th>'
+                 f'</tr></thead><tbody>{rows}</tbody></table>') if rows else ""
+        reasons = vd.get("reasons") or []
+        # 只列不在检查表里的补充信息，避免把明细原句再抄一遍
+        shown = {c["detail"] for c in (vd.get("checks") or [])}
+        extra = [r for r in reasons if r not in shown]
+        more = f'<p class="cap">另需注意：{_e("；".join(extra))}</p>' if extra else ""
+        return (
+            f'<section class="verdict {level}">'
+            f'<p class="vl">{icon} {label}</p>'
+            f'<p class="vh">{_e(vd.get("headline", ""))}</p>'
+            f"{table}{more}"
+            f'<p class="cap">判断依据：CICIDS 类数据集的常见区间（AUC 0.93–0.99、误报率 0.5%–8%），'
+            f"只用于发现异常，不是评分标准。</p>"
+            f"</section>"
+        )
+
+    verdict_box = _verdict_box()
+
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -193,6 +244,8 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
 <p class="kicker">RUN {_e(v.hash)} · {_e(v.fmt)}</p>
 <h1>流量异常检测实验报告</h1>
 <p class="sub">{_e(v.source)} · {v.rows} 条流 · 指纹 {_e(v.hash)}</p>
+
+{verdict_box}
 
 <div class="band">
   <div class="cell"><div class="k">最佳模型</div><div class="v mono">{_e(v.best_model)}</div>

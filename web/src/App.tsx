@@ -9,6 +9,7 @@ import { MetricMatrix } from "./components/MetricMatrix";
 import { SignalStrip } from "./components/SignalStrip";
 import { AblationTable } from "./components/AblationTable";
 import { TopFlows } from "./components/TopFlows";
+import { VerdictCard } from "./components/VerdictCard";
 
 const ALL = ["mlp", "iforest", "autoencoder"];
 
@@ -186,11 +187,13 @@ export default function App() {
                   </div>
                   <div className="v-note">
                     {suspicious
-                      ? `AUC 接近满分且存在 ${payload.warnings.length} 条泄漏 — 先看右侧检查结果。`
+                      ? `AUC 接近满分且存在 ${payload.warnings.length} 条泄漏 — 先看下方结论。`
                       : best.kind === "supervised" ? "监督模型，使用训练集标签" : "无监督基线，不使用标签"}
                   </div>
                 </div>
               </header>
+
+              {payload.verdict && <VerdictCard verdict={payload.verdict} />}
 
               <section className="block">
                 <header className="block-head">

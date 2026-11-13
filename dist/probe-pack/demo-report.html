@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FlowLab 实验报告 302ce3c97495ff00</title>
+<style>
+:root{--paper:#fbfaf7;--ink:#14161a;--ink2:#3d444b;--muted:#616870;--rule:#e7e3da;
+--rule2:#cdc7ba;--navy:#1b3b5f;--alert:#a4262c;--amber:#8a5a00;--ok:#1d6a4a}
+*{box-sizing:border-box}
+body{margin:0;padding:56px 40px 72px;background:var(--paper);color:var(--ink);
+font:14px/1.65 "Inter","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto}
+.mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums}
+h1{font-family:"Newsreader",Georgia,serif;font-weight:400;font-size:36px;line-height:1.15;
+letter-spacing:-.015em;margin:0 0 4px}
+h2{font-family:"Newsreader",Georgia,serif;font-weight:400;font-size:23px;margin:44px 0 14px}
+h2 .idx{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);margin-right:10px;vertical-align:2px}
+.sub{color:var(--ink2);font-size:13px;margin:0}
+.kicker{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink2);margin:0 0 4px}
+.band{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--ink);
+border-bottom:1px solid var(--rule);margin:22px 0 0}
+.band .cell{padding:18px 18px 20px 0}
+.band .cell+.cell{border-left:1px solid var(--rule);padding-left:18px}
+.band .k{font-size:11px;color:var(--muted);margin-bottom:6px}
+.band .v{font-family:"Newsreader",Georgia,serif;font-size:34px;line-height:1;letter-spacing:-.02em}
+.band .v.mono{font-family:"IBM Plex Mono",monospace;font-size:30px;letter-spacing:-.04em}
+.band .v.warn{color:var(--alert)}
+.band .n{font-size:11.5px;color:var(--muted);margin-top:8px}
+.band .n.warn{color:var(--alert)}
+.risk{margin:16px 0 0;padding:10px 14px;border-left:2px solid var(--alert);
+background:rgba(164,38,44,.045);font-size:13px;display:flex;gap:10px;align-items:baseline}
+.risk .tag{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--alert)}
+.risk .more{margin-left:auto;font-size:11.5px;color:var(--muted)}
+table.data{width:100%;border-collapse:collapse;font-size:13px}
+table.data thead th{text-align:left;font-size:11.5px;font-weight:600;color:var(--ink2);
+padding:0 12px 9px;border-bottom:1px solid var(--rule2);white-space:nowrap}
+table.data td,table.data tbody th{padding:12px;border-bottom:1px solid var(--rule);text-align:left}
+table.data tbody th{font-weight:500}
+table.data tbody tr:last-child td,table.data tbody tr:last-child th{border-bottom:0}
+table.data .num{text-align:right;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+table.data thead th.num{text-align:right}
+table.data tr.best{background:#f3f6f9}
+table.data tr.best th:first-child{box-shadow:inset 2px 0 0 var(--navy)}
+.best-tag{display:inline-block;margin-left:8px;padding:0 5px;font-size:10px;color:var(--navy);
+border:1px solid #c2d0dd;border-radius:2px;vertical-align:1px}
+.muted{color:var(--muted)} .bad{color:var(--alert)} .ok{color:var(--ok)}
+.sigwrap{display:grid;grid-template-columns:32px 1fr;gap:10px;margin:10px 0 0}
+.sigy{display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;
+font:10px/1 "IBM Plex Mono",monospace;color:var(--muted);padding-bottom:1px}
+.signal{display:flex;align-items:flex-end;gap:2px;height:150px;position:relative;border-bottom:1px solid var(--rule2)}
+.tick{flex:1;background:var(--navy);opacity:.32;border-radius:1px 1px 0 0}
+.hits{display:flex;gap:2px;height:5px;margin-top:0}
+.hits span{flex:1;background:var(--alert);border-radius:0 0 1px 1px}
+.thr{position:absolute;left:0;right:0;border-top:1px dashed var(--alert);opacity:.85}
+.thr span{position:absolute;right:6px;top:-16px;padding:1px 5px;background:var(--paper);
+font:10px/1 "IBM Plex Mono",monospace;color:var(--alert)}
+.cap{color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:12px;margin-top:8px}
+.leaks{display:flex;flex-direction:column}
+.leak{display:grid;grid-template-columns:104px 1fr;gap:18px;padding:14px 0 14px 14px;
+border-bottom:1px solid var(--rule);border-left:2px solid var(--rule2)}
+.leak.high{border-left-color:var(--alert);background:linear-gradient(to right,rgba(164,38,44,.035),transparent 60%)}
+.leak.medium{border-left-color:var(--amber)}
+.leak:first-child{border-top:1px solid var(--rule)}
+.leak .rule-name{font-family:"IBM Plex Mono",monospace;font-size:11.5px}
+.leak .sev{display:block;margin-top:4px;font-size:10.5px;color:var(--muted)}
+.leak p{margin:0 0 4px;font-size:13px}
+.leak .fix{font-size:12px;color:var(--muted)}
+.feat-list{margin:12px 0 0;display:flex;flex-wrap:wrap;gap:6px}
+.feat{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink2);
+background:#f1efe9;padding:2px 6px;border-radius:2px}
+.foot{margin-top:44px;padding-top:14px;border-top:1px solid var(--rule);font-size:11.5px;color:var(--muted)}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}}
+</style></head>
+<body><div class="wrap">
+<p class="kicker">RUN 302ce3c97495ff00 · synthetic</p>
+<h1>流量异常检测实验报告</h1>
+<p class="sub">合成数据 · 4400 条流 · 指纹 302ce3c97495ff00</p>
+
+<div class="band">
+  <div class="cell"><div class="k">最佳模型</div><div class="v mono">mlp</div>
+    <div class="n">监督</div></div>
+  <div class="cell"><div class="k">AUC</div>
+    <div class="v warn">1.0000</div>
+    <div class="n warn">
+      接近满分且存在泄漏，先看下方提示</div></div>
+  <div class="cell"><div class="k">F1</div><div class="v">0.9880</div>
+    <div class="n">精确率 1.000 · 召回率 0.976</div></div>
+  <div class="cell"><div class="k">误报率</div><div class="v mono">0.00%</div>
+    <div class="n">正常流被误判的比例</div></div>
+</div>
+<div class="risk"><span class="tag">1 条泄漏</span><span>port_leak：类别 DDoS 中有 95.2% 的流目的端口是 3333。</span><span class="more">明细见第 03 节</span></div>
+
+<h2><span class="idx">01</span>测试集分数峰值</h2>
+<div class="sigwrap"><div class="sigy"><span>1.0</span><span>0.5</span><span>0.0</span></div><div><div class="signal"><span class="tick" style="height:6.4%"></span><span class="tick" style="height:99.3%"></span><span class="tick" style="height:95.0%"></span><span class="tick" style="height:7.6%"></span><span class="tick" style="height:6.2%"></span><span class="tick" style="height:98.4%"></span><span class="tick" style="height:100.0%"></span><span class="tick" style="height:98.9%"></span><span class="tick" style="height:99.8%"></span><span class="tick" style="height:4.4%"></span><span class="tick" style="height:98.8%"></span><span class="tick" style="height:4.5%"></span><span class="tick" style="height:91.1%"></span><span class="tick" style="height:98.4%"></span><span class="tick" style="height:97.9%"></span><span class="tick" style="height:99.5%"></span><span class="tick" style="height:95.0%"></span><span class="tick" style="height:4.2%"></span><span class="tick" style="height:98.9%"></span><span class="tick" style="height:96.6%"></span><span class="tick" style="height:100.0%"></span><span class="tick" style="height:97.6%"></span><span class="tick" style="height:98.7%"></span><span class="tick" style="height:4.3%"></span><span class="tick" style="height:99.2%"></span><span class="tick" style="height:96.3%"></span><span class="tick" style="height:98.6%"></span><span class="tick" style="height:99.6%"></span><span class="tick" style="height:91.3%"></span><span class="tick" style="height:99.5%"></span><span class="tick" style="height:97.9%"></span><span class="tick" style="height:99.5%"></span><span class="tick" style="height:4.6%"></span><span class="tick" style="height:2.9%"></span><span class="tick" style="height:98.0%"></span><span class="tick" style="height:94.7%"></span><span class="tick" style="height:98.7%"></span><span class="tick" style="height:89.5%"></span><span class="tick" style="height:99.5%"></span><span class="tick" style="height:93.5%"></span><span class="tick" style="height:87.4%"></span><span class="tick" style="height:5.2%"></span><span class="tick" style="height:5.9%"></span><span class="tick" style="height:99.6%"></span><span class="tick" style="height:94.4%"></span><span class="tick" style="height:99.1%"></span><span class="tick" style="height:4.8%"></span><span class="tick" style="height:96.1%"></span><span class="tick" style="height:47.6%"></span><span class="tick" style="height:96.3%"></span><span class="tick" style="height:98.4%"></span><span class="tick" style="height:100.0%"></span><span class="tick" style="height:98.0%"></span><span class="tick" style="height:7.3%"></span><span class="tick" style="height:70.1%"></span><span class="tick" style="height:97.7%"></span><span class="tick" style="height:99.8%"></span><span class="tick" style="height:3.6%"></span><span class="tick" style="height:6.4%"></span><span class="tick" style="height:4.5%"></span><span class="tick" style="height:100.0%"></span><span class="tick" style="height:99.1%"></span><span class="tick" style="height:98.3%"></span><span class="tick" style="height:99.9%"></span><span class="tick" style="height:98.7%"></span><span class="tick" style="height:99.0%"></span><span class="tick" style="height:98.8%"></span><span class="tick" style="height:97.2%"></span><span class="tick" style="height:93.7%"></span><span class="tick" style="height:79.5%"></span><span class="tick" style="height:99.8%"></span><span class="tick" style="height:8.2%"></span><span class="tick" style="height:99.5%"></span><span class="tick" style="height:4.3%"></span><span class="tick" style="height:94.3%"></span><span class="tick" style="height:96.1%"></span><span class="tick" style="height:99.9%"></span><span class="tick" style="height:95.5%"></span><span class="tick" style="height:96.7%"></span><span class="tick" style="height:93.0%"></span><span class="tick" style="height:5.5%"></span><span class="tick" style="height:5.8%"></span><span class="tick" style="height:81.4%"></span><span class="tick" style="height:98.5%"></span><span class="tick" style="height:99.3%"></span><span class="tick" style="height:99.5%"></span><span class="tick" style="height:52.1%"></span><span class="tick" style="height:6.4%"></span><span class="tick" style="height:4.2%"></span><span class="tick" style="height:99.7%"></span><div class="thr" style="bottom:50%"><span>阈值 0.50</span></div></div><div class="hits"><span style="opacity:0"></span><span style="opacity:0.48"></span><span style="opacity:0.48"></span><span style="opacity:0"></span><span style="opacity:0"></span><span style="opacity:0.48"></span><span style="opacity:0.61"></span><span style="opacity:0.61"></span><span style="opacity:1.00"></span><span style="opacity:0"></span><span style="opacity:0.74"></span><span style="opacity:0"></span><span style="opacity:0.48"></span><span style="opacity:0.61"></span><span style="opacity:0.87"></span><span style="opacity:0.61"></span><span style="opacity:0.61"></span><span style="opacity:0"></span><span style="opacity:0.48"></span><span style="opacity:0.48"></span><span style="opacity:0.74"></span><span style="opacity:0.48"></span><span style="opacity:0.74"></span><span style="opacity:0"></span><span style="opacity:0.87"></span><span style="opacity:0.48"></span><span style="opacity:0.61"></span><span style="opacity:0.61"></span><span style="opacity:0.48"></span><span style="opacity:0.48"></span><span style="opacity:0.48"></span><span style="opacity:0.61"></span><span style="opacity:0"></span><span style="opacity:0"></span><span style="opacity:0.61"></span><span style="opacity:0.61"></span><span style="opacity:0.61"></span><span style="opacity:0.48"></span><span style="opacity:0.48"></span><span style="opacity:0.48"></span><span style="opacity:0.48"></span><span style="opacity:0"></span><span style="opacity:0"></span><span style="opacity:0.48"></span><span style="opacity:0.48"></span><span style="opacity:0.61"></span><span style="opacity:0"></span><span style="opacity:0.74"></span><span style="opacity:0"></span><span style="opacity:0.48"></span><span style="opacity:0.48"></span><span style="opacity:0.74"></span><span style="opacity:0.61"></span><span style="opacity:0"></span><span style="opacity:0.61"></span><span style="opacity:0.61"></span><span style="opacity:0.48"></span><span style="opacity:0"></span><span style="opacity:0"></span><span style="opacity:0"></span><span style="opacity:0.63"></span><span style="opacity:0.49"></span><span style="opacity:0.49"></span><span style="opacity:0.77"></span><span style="opacity:0.77"></span><span style="opacity:0.77"></span><span style="opacity:0.63"></span><span style="opacity:0.63"></span><span style="opacity:0.63"></span><span style="opacity:0.63"></span><span style="opacity:0.77"></span><span style="opacity:0"></span><span style="opacity:0.49"></span><span style="opacity:0"></span><span style="opacity:0.49"></span><span style="opacity:0.49"></span><span style="opacity:0.77"></span><span style="opacity:0.49"></span><span style="opacity:0.49"></span><span style="opacity:0.63"></span><span style="opacity:0"></span><span style="opacity:0"></span><span style="opacity:0.49"></span><span style="opacity:0.63"></span><span style="opacity:0.77"></span><span style="opacity:0.63"></span><span style="opacity:0.49"></span><span style="opacity:0"></span><span style="opacity:0"></span><span style="opacity:0.63"></span></div></div></div><div class="cap"><span>测试集开头</span><span>柱高＝窗口最高分；红色短条＝该窗口含超阈值流</span><span>测试集结尾</span></div>
+
+
+<h2><span class="idx">02</span>模型对比</h2>
+<table class="data"><thead><tr><th>模型</th><th>类型</th><th class="num">AUC</th><th class="num">F1</th>
+<th class="num">精确率</th><th class="num">召回率</th><th class="num">误报率</th><th class="num">耗时</th>
+<th class="num">TP</th><th class="num">FP</th><th class="num">FN</th><th class="num">TN</th></tr></thead>
+<tbody><tr class="best"><th scope="row" class="mono">mlp<span class=best-tag>最佳</span></th><td class="muted">监督</td><td class="num">1.0000</td><td class="num">0.9880</td><td class="num">1.0000</td><td class="num">0.9762</td><td class="num">0.00%</td><td class="num muted">0.67s</td><td class="num">123</td><td class="num bad">0</td><td class="num bad">3</td><td class="num">1,194</td></tr><tr class=""><th scope="row" class="mono">iforest</th><td class="muted">无监督</td><td class="num">0.9706</td><td class="num">0.4842</td><td class="num">0.7188</td><td class="num">0.3651</td><td class="num">1.51%</td><td class="num muted">0.48s</td><td class="num">46</td><td class="num bad">18</td><td class="num bad">80</td><td class="num">1,176</td></tr><tr class=""><th scope="row" class="mono">autoencoder</th><td class="muted">无监督</td><td class="num">0.9921</td><td class="num">0.8514</td><td class="num">0.8618</td><td class="num">0.8413</td><td class="num">1.42%</td><td class="num muted">0.30s</td><td class="num">106</td><td class="num bad">17</td><td class="num bad">20</td><td class="num">1,177</td></tr></tbody></table>
+
+<h2><span class="idx">03</span>数据泄漏检查</h2>
+<div class="leaks"><div class="leak medium"><div><span class="rule-name">port_leak</span><span class="sev">medium · dst_port</span></div><div><p>类别 DDoS 中有 95.2% 的流目的端口是 3333。</p><p class="fix">建议：先确认这是业务特征还是数据集构造痕迹；若为构造痕迹，去掉端口列重跑对比。</p></div></div></div>
+
+
+
+<h2><span class="idx">04</span>最可疑的流</h2>
+<table class="data"><thead><tr><th>源</th><th>目的</th><th class="num">端口</th><th>协议</th>
+<th>时间</th><th class="num">分数</th><th>真实标签</th></tr></thead><tbody><tr><td class="mono">10.0.0.185</td><td class="mono">192.168.1.242</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 16:47:05</td><td class="num">1.000</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.125</td><td class="mono">192.168.1.142</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 15:35:54</td><td class="num">1.000</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.201</td><td class="mono">192.168.1.126</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 19:55:31</td><td class="num">1.000</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.239</td><td class="mono">192.168.1.0</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 19:14:02</td><td class="num">1.000</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.36</td><td class="mono">192.168.1.195</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 20:12:38</td><td class="num">0.999</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.12</td><td class="mono">192.168.1.218</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 21:12:31</td><td class="num">0.999</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.100</td><td class="mono">192.168.1.14</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 15:45:13</td><td class="num">0.998</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.249</td><td class="mono">192.168.1.170</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 19:38:12</td><td class="num">0.998</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.163</td><td class="mono">192.168.1.212</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 20:40:26</td><td class="num">0.998</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.82</td><td class="mono">192.168.1.42</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 22:09:48</td><td class="num">0.997</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.103</td><td class="mono">192.168.1.166</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 17:17:43</td><td class="num">0.996</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.116</td><td class="mono">192.168.1.68</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 18:34:05</td><td class="num">0.996</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.45</td><td class="mono">192.168.1.73</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 16:17:52</td><td class="num">0.995</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.31</td><td class="mono">192.168.1.29</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 18:11:19</td><td class="num">0.995</td><td class="bad">DDoS</td></tr><tr><td class="mono">10.0.0.166</td><td class="mono">192.168.1.148</td><td class="num">3333</td><td class="muted">17</td><td class="mono muted">2023-11-15 17:29:07</td><td class="num">0.995</td><td class="bad">DDoS</td></tr></tbody></table>
+
+<h2><span class="idx">05</span>实验配置</h2>
+<table class="data"><tr><th>数据来源</th><td>合成数据（synthetic）</td></tr><tr><th>样本量</th><td>4400（训练 3080 / 测试 1320）</td></tr><tr><th>攻击样本</th><td>训练 274 / 测试 126</td></tr><tr><th>数据指纹</th><td><span class="mono">302ce3c97495ff00</span></td></tr><tr><th>切分方式</th><td>temporal</td></tr><tr><th>随机种子</th><td>42</td></tr><tr><th>判定阈值</th><td>0.50</td></tr><tr><th>标签对齐</th><td>embedded（4400/4400）</td></tr><tr><th>速率兜底</th><td>1.0 ms</td></tr><tr><th>类别分布</th><td>BENIGN 4,000 · DDoS 400</td></tr><tr><th>训练特征</th><td>15 列（编码后 26 维）</td></tr><tr><th>生成时间</th><td>2026-11-13 15:03:32</td></tr></table>
+<p class="feat-list"><code class="feat">dst_port</code><code class="feat">protocol</code><code class="feat">duration_us</code><code class="feat">fwd_packets</code><code class="feat">bwd_packets</code><code class="feat">fwd_bytes</code><code class="feat">bwd_bytes</code><code class="feat">bytes_per_s</code><code class="feat">packets_per_s</code><code class="feat">raw_bytes_per_s</code><code class="feat">raw_packets_per_s</code><code class="feat">duration_ms</code><code class="feat">duration_ms_effective</code><code class="feat">bytes_per_pkt</code><code class="feat">is_single_packet</code></p>
+
+<p class="foot">复现：<span class="mono">uv run flowlab demo --split temporal --seed 42 --models mlp,iforest,autoencoder</span><br>
+同一数据指纹 + 同样的切分与随机种子，结果应逐位一致（浮点误差除外）。本文件自包含，可离线归档。</p>
+</div></body></html>

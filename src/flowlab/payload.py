@@ -4,6 +4,7 @@ from __future__ import annotations
 import pandas as pd
 
 from flowlab.eval.runner import EvalResult
+from flowlab.eval.verdict import judge
 from flowlab.report.html import render_html
 from flowlab.report.markdown import render_report
 
@@ -52,8 +53,15 @@ def build_payload(df: pd.DataFrame, results: list[EvalResult], warns: list[dict]
                    "engineering": dataset["engineering"], "format": dataset["format"],
                    "classes": dataset["classes"], "features": dataset["features"],
                    "attack_support": dataset["attack_test"]}
+
+    verdict = judge(best.metrics if best else {}, warns, dataset["test"], ablation,
+                    used_features=dataset["features"]["used"])
+    report_meta["verdict"] = {"level": verdict.level, "headline": verdict.headline,
+                              "reasons": verdict.reasons, "checks": verdict.checks}
+
     return {
         "dataset": dataset,
+        "verdict": report_meta["verdict"],
         "warnings": warns,
         "results": [r.to_dict() for r in results],
         "best_model": best.model if best else None,
