@@ -10,7 +10,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from flowlab.schema import META_COLUMNS
+from flowlab.schema import META_COLUMNS, is_benign
 
 BENIGN = "benign"
 
@@ -28,7 +28,8 @@ class Prepared:
 
 
 def _label_to_binary(labels: pd.Series) -> np.ndarray:
-    return (labels.astype(str).str.strip().str.lower() != BENIGN).astype(int).to_numpy()
+    """BENIGN/normal/0/False → 0，其余 → 1。"""
+    return (~labels.map(is_benign)).astype(int).to_numpy()
 
 
 def build_matrix(df: pd.DataFrame, label_col: str = "label", drop_extra: list[str] | None = None) -> Prepared:

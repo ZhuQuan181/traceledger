@@ -1,6 +1,6 @@
 [project]
 name = "flowlab"
-version = "0.3.0"
+version = "0.4.0"
 description = "FlowLab - 流量异常检测研究/实验工作台"
 requires-python = ">=3.11"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.8"]
 api = ["fastapi>=0.115", "uvicorn>=0.32", "python-multipart>=0.0.12"]
+data = ["pyarrow>=15", "openpyxl>=3.1"]
 
 [project.scripts]
 flowlab = "flowlab.cli:main"

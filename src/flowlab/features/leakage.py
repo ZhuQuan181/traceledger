@@ -11,11 +11,11 @@ from typing import Any
 
 import pandas as pd
 
-BENIGN = "benign"
+from flowlab.schema import is_benign
 
 
 def _is_benign(value: Any) -> bool:
-    return str(value).strip().lower() == BENIGN
+    return is_benign(value)
 
 
 def detect(df: pd.DataFrame, split: str = "temporal", label_col: str = "label") -> list[dict]:

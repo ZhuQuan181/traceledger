@@ -13,13 +13,13 @@ from pathlib import Path
 import pandas as pd
 
 from flowlab.ingest.csv import read_csv
-from flowlab.schema import normalize_columns
+from flowlab.schema import is_benign as _is_benign_value, normalize_columns
 
 KEYS = ["src_ip", "dst_ip", "src_port", "dst_port", "protocol"]
 
 
 def _is_benign(series: pd.Series) -> pd.Series:
-    return series.astype(str).str.strip().str.lower().eq("benign")
+    return series.map(_is_benign_value)
 
 
 def attach_labels(flows: pd.DataFrame, labels_path: str | Path) -> tuple[pd.DataFrame, dict]:
@@ -42,10 +42,14 @@ def attach_labels(flows: pd.DataFrame, labels_path: str | Path) -> tuple[pd.Data
     # 2) 五元组
     keys = [k for k in KEYS if k in lab.columns and k in flows.columns]
     if len(keys) >= 3:
-        agg = lab.groupby(keys, dropna=False)["label"].agg(
-            lambda s: "BENIGN" if _is_benign(s).all() else next(
-                (v for v in s if not str(v).strip().lower() == "benign"), "ATTACK")
-        ).reset_index()
+        def _merge_labels(s: pd.Series) -> str:
+            if _is_benign(s).all():
+                return "BENIGN"
+            # 保留具体的攻击类型（DDoS / PortScan ...），便于报告里看出是什么攻击
+            bad = [v for v, benign in zip(s, _is_benign(s)) if not benign]
+            return str(bad[0]) if bad else "ATTACK"
+
+        agg = lab.groupby(keys, dropna=False)["label"].agg(_merge_labels).reset_index()
         merged = flows.merge(agg, on=keys, how="left")
         # 二进制标签用 BENIGN / ATTACK 表示，避免把具体攻击类型压平后失去信息
         if merged["label"].notna().sum():

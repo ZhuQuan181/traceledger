@@ -85,7 +85,7 @@ def run_experiment(df: pd.DataFrame, models: list[str] | None = None,
             top = te.sort_values("score", ascending=False).head(top_k)
             import numpy as _np
             arr = _np.asarray(scores, dtype=float)
-            buckets = _np.array_split(arr, min(200, max(20, len(arr) // 5)))
+            buckets = _np.array_split(arr, min(90, max(20, len(arr) // 12)))
             # p = 该时间窗内的最高分（用来定高度），h = 超过阈值的比例（用来定红色浓度）
             score_curve = [
                 {"p": round(float(_np.max(b)), 3), "h": round(float((b >= threshold).mean()), 3)}

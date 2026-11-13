@@ -49,3 +49,23 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     out = df.rename(columns=mapping)
     # 去掉因映射产生的重复列（保留第一个）
     return out.loc[:, ~out.columns.duplicated()]
+
+
+BENIGN_ALIASES = {"benign", "normal", "0", "0.0", "false", "no", "n", "good", "clean", "negative"}
+ATTACK_ALIASES = {"attack", "anomaly", "malicious", "1", "1.0", "true", "yes", "bad", "positive"}
+
+
+def is_benign(value) -> bool:
+    """把 0/False/'normal'/'BENIGN' 都当成正常样本。"""
+    s = str(value).strip().lower()
+    return s in BENIGN_ALIASES
+
+
+def canonical_label(value) -> str:
+    s = str(value).strip()
+    low = s.lower()
+    if low in BENIGN_ALIASES:
+        return "BENIGN"
+    if low in ATTACK_ALIASES:
+        return "ATTACK"
+    return s

@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from flowlab.engineer import add_engineered_features, describe
+from flowlab.ingest import read_any
 from flowlab.labels import attach_labels, guess_sidecar
 from flowlab.schema import normalize_columns
 
@@ -20,22 +21,17 @@ class LoadedFrame:
     source: str
     label_info: dict = field(default_factory=dict)
     engineering: dict = field(default_factory=describe)
+    format_info: dict = field(default_factory=dict)
 
     def meta(self) -> dict:
-        return {"source": self.source, "labels": self.label_info, "engineering": self.engineering}
+        return {"source": self.source, "labels": self.label_info,
+                "engineering": self.engineering, "format": self.format_info}
 
 
-def load_frame(path: str | Path, labels_path: str | Path | None = None) -> LoadedFrame:
+def load_frame(path: str | Path, labels_path: str | Path | None = None,
+               allow_pickle: bool = False) -> LoadedFrame:
     p = Path(path)
-    suffix = p.suffix.lower()
-
-    if suffix in {".pcap", ".pcapng"}:
-        from flowlab.ingest.pcap import read_pcap
-        df, kind = read_pcap(p), "pcap"
-    else:
-        from flowlab.ingest.csv import read_csv
-        df, kind = read_csv(p), "csv"
-
+    df, fmt = read_any(p, allow_pickle=allow_pickle)
     df = normalize_columns(df)
 
     info: dict = {}
@@ -48,4 +44,5 @@ def load_frame(path: str | Path, labels_path: str | Path | None = None) -> Loade
                 "total": len(df), "matches": int(df["label"].notna().sum())}
 
     df = add_engineered_features(df)
-    return LoadedFrame(df=df, source=f"{p.name}（{kind}）", label_info=info)
+    return LoadedFrame(df=df, source=f"{p.name}（{fmt.get('format', p.suffix)}）",
+                       label_info=info, format_info=fmt)

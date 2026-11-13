@@ -1,4 +1,4 @@
-"""本地 API：给前端用的一个薄层，不引入数据库服务（只用一个 SQLite 文件）。
+"""本地 API：薄层，编排全在 service.execute()。
 
 启动：uv run flowlab serve  →  http://127.0.0.1:8765
 """
@@ -13,15 +13,12 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from flowlab.eval.runner import run_experiment
 from flowlab.models.registry import available
-from flowlab.payload import build_payload
 from flowlab.pipeline import load_frame
-from flowlab.schema import normalize_columns
+from flowlab.service import ExperimentSpec, execute
 from flowlab.store import get_run, list_runs, save_run
-from flowlab.synthetic import generate
 
-app = FastAPI(title="FlowLab", version="0.3.0")
+app = FastAPI(title="FlowLab", version="0.4.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -32,8 +29,8 @@ class DemoRequest(BaseModel):
     split: str = "temporal"
     models: list[str] = Field(default_factory=lambda: ["mlp", "iforest", "autoencoder"])
     threshold: float = 0.5
-    explain: bool = True
     ablate: str | None = None
+    leaky: bool = False
     save: bool = True
 
 
@@ -45,7 +42,7 @@ def _validate(models: list[str]) -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "models": available(), "version": "0.3.0"}
+    return {"ok": True, "models": available(), "version": "0.4.0"}
 
 
 @app.get("/api/models")
@@ -54,26 +51,32 @@ def models():
     return {"models": [{"name": n, "kind": create(n).kind} for n in available()]}
 
 
+@app.get("/api/formats")
+def formats():
+    from flowlab.ingest import supported_formats
+    return {"formats": supported_formats()}
+
+
 @app.post("/api/demo")
 def demo(req: DemoRequest):
     _validate(req.models)
     from flowlab.engineer import add_engineered_features, describe
+    from flowlab.schema import normalize_columns
+    from flowlab.synthetic import generate
+
     df = add_engineered_features(
-        normalize_columns(generate(n_normal=req.normal, n_attack=req.attack, seed=req.seed)))
+        normalize_columns(generate(n_normal=req.normal, n_attack=req.attack,
+                                   seed=req.seed, leakage_only=req.leaky)))
     meta = {"engineering": describe(),
-            "labels": {"mode": "embedded", "labelled": len(df), "total": len(df)}}
+            "labels": {"mode": "embedded", "labelled": len(df), "total": len(df)},
+            "format": {"format": "synthetic", "shape": f"{len(df)} 行"}}
+    spec = ExperimentSpec(models=req.models, split=req.split, seed=req.seed,
+                          threshold=req.threshold, ablate=req.ablate)
     try:
-        results, warns = run_experiment(df, models=req.models, split=req.split, seed=req.seed,
-                                        threshold=req.threshold, explain=req.explain)
-        ablation = None
-        if req.ablate:
-            from flowlab.eval.ablation import ablate
-            ablation = ablate(df, req.ablate, models=req.models, split=req.split,
-                              seed=req.seed, threshold=req.threshold).to_dict()
+        payload = execute(df, meta, "合成数据（端口泄漏版）" if req.leaky else "合成数据", spec)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    payload = build_payload(df, results, warns, "合成数据", meta, ablation=ablation)
     if req.save:
         payload["run_id"] = save_run(payload)
     return payload
@@ -83,7 +86,8 @@ def demo(req: DemoRequest):
 async def upload(file: UploadFile = File(...), labels: UploadFile | None = File(None),
                  split: str = Form("temporal"), models: str = Form("mlp,iforest,autoencoder"),
                  threshold: float = Form(0.5), seed: int = Form(42),
-                 ablate: str = Form(""), save: bool = Form(True)):
+                 ablate: str = Form(""), allow_pickle: bool = Form(False),
+                 save: bool = Form(True)):
     mlist = [m.strip() for m in models.split(",") if m.strip()]
     _validate(mlist)
 
@@ -100,39 +104,42 @@ async def upload(file: UploadFile = File(...), labels: UploadFile | None = File(
         if labels is not None:
             lab_data = await labels.read()
             if lab_data:
-                lab_path = Path(td) / "labels.csv"
+                lab_path = Path(td) / f"labels{Path(labels.filename or 'labels.csv').suffix or '.csv'}"
                 lab_path.write_bytes(lab_data)
         try:
             from flowlab.ingest.pcap import PcapUnavailable
             try:
-                loaded = load_frame(p, lab_path)
+                loaded = load_frame(p, lab_path, allow_pickle=allow_pickle)
             except PcapUnavailable as exc:
                 raise HTTPException(400, str(exc)) from exc
             df, meta = loaded.df, loaded.meta()
             if labels is not None and meta.get("labels", {}).get("file"):
                 meta["labels"]["file"] = labels.filename
-        except (ValueError, FileNotFoundError) as exc:
-            raise HTTPException(400, str(exc)) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(400, f"读取失败：{exc}") from exc
 
     if "label" not in df.columns:
         raise HTTPException(
             400,
-            "这份数据没有标签列，无法算 AUC/F1。pcap 请同时上传标签 CSV（五元组或 flow_id 对齐），"
-            "或者用 CLI 的 score 子命令做无监督排序。",
+            "这份数据没有标签列，无法算 AUC/F1。可以在文件里补 label 列，"
+            "上传一个标签 CSV（五元组 / flow_id / 行序对齐），或改用 score 命令做无监督排序。",
         )
 
+    spec = ExperimentSpec(models=mlist, split=split, seed=seed,
+                          threshold=threshold, ablate=ablate or None)
     try:
-        results, warns = run_experiment(df, models=mlist, split=split, seed=seed,
-                                        threshold=threshold, explain=True)
-        ablation = None
-        if ablate:
-            from flowlab.eval.ablation import ablate as run_ablation
-            ablation = run_ablation(df, ablate, models=mlist, split=split,
-                                    seed=seed, threshold=threshold).to_dict()
+        payload = execute(df, meta, name, spec)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
-    payload = build_payload(df, results, warns, name, meta, ablation=ablation)
+    if allow_pickle:
+        payload["warnings"].append({
+            "rule": "pickle_unsafe", "columns": [], "severity": "medium",
+            "message": "该文件以 pickle 加载，反序列化会执行代码；请只加载自己生成的文件。",
+            "suggestion": "分享数据时优先用 parquet / npz / csv。",
+        })
     if save:
         payload["run_id"] = save_run(payload)
     return payload

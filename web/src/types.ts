@@ -59,6 +59,7 @@ export type Dataset = {
   attack_test?: number;
   labels?: { mode?: string; labelled?: number; total?: number; file?: string };
   engineering?: { min_duration_ms?: number; derived?: string[]; note?: string };
+  format?: { format?: string; shape?: string; note?: string; pickle_object?: string };
 };
 
 export type Ablation = {

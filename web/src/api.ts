@@ -24,15 +24,15 @@ export async function loadRun(id: string): Promise<Payload> {
   return json<Payload>(await fetch(`/api/history/${id}`));
 }
 
-export type DemoParams = {
-  normal: number;
-  attack: number;
+export type RunParams = {
   seed: number;
   split: "temporal" | "random";
   models: string[];
   threshold: number;
   ablate?: string | null;
 };
+
+export type DemoParams = RunParams & { normal: number; attack: number; leaky?: boolean };
 
 export async function runDemo(p: DemoParams): Promise<Payload> {
   const res = await fetch("/api/demo", {
@@ -45,8 +45,9 @@ export async function runDemo(p: DemoParams): Promise<Payload> {
 
 export async function runUpload(
   file: File,
-  p: Omit<DemoParams, "normal" | "attack">,
-  labels?: File | null
+  p: RunParams,
+  labels?: File | null,
+  allowPickle = false
 ): Promise<Payload> {
   const form = new FormData();
   form.append("file", file);
@@ -56,6 +57,7 @@ export async function runUpload(
   form.append("threshold", String(p.threshold));
   form.append("seed", String(p.seed));
   if (p.ablate) form.append("ablate", p.ablate);
+  form.append("allow_pickle", String(allowPickle));
   const res = await fetch("/api/upload", { method: "POST", body: form });
   return json<Payload>(res);
 }
