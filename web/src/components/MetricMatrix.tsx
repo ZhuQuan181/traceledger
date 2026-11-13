@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { Result } from "../types";
+import { int, num, pct, secs } from "../format";
 
 type Key = "auc" | "f1" | "fpr" | "duration_s";
 
@@ -46,18 +47,18 @@ export function MetricMatrix({ results, bestModel }: { results: Result[]; bestMo
               {r.model === bestModel && <span className="best-tag">最佳</span>}
             </th>
             <td className="num strong">
-              {r.metrics.auc == null ? "—" : r.metrics.auc.toFixed(4)}
+              {num(r.metrics.auc)}
               <span className="cell-bar" aria-hidden="true">
                 <i style={{ width: `${Math.round((r.metrics.auc ?? 0) * 100)}%` }} />
               </span>
             </td>
-            <td className="num">{r.metrics.f1.toFixed(4)}</td>
-            <td className="num">{r.metrics.fpr == null ? "—" : `${(r.metrics.fpr * 100).toFixed(2)}%`}</td>
-            <td className="num muted">{r.duration_s.toFixed(2)}s</td>
-            <td className="num">{r.confusion.tp.toLocaleString()}</td>
-            <td className="num bad">{r.confusion.fp.toLocaleString()}</td>
-            <td className="num bad">{r.confusion.fn.toLocaleString()}</td>
-            <td className="num">{r.confusion.tn.toLocaleString()}</td>
+            <td className="num">{num(r.metrics.f1)}</td>
+            <td className="num">{pct(r.metrics.fpr)}</td>
+            <td className="num muted">{secs(r.duration_s)}</td>
+            <td className="num">{int(r.confusion.tp)}</td>
+            <td className="num bad">{int(r.confusion.fp)}</td>
+            <td className="num bad">{int(r.confusion.fn)}</td>
+            <td className="num">{int(r.confusion.tn)}</td>
           </tr>
         ))}
       </tbody>

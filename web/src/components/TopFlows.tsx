@@ -1,4 +1,5 @@
 import type { TopFlow } from "../types";
+import { num } from "../format";
 
 const PROTO: Record<number, string> = { 1: "ICMP", 6: "TCP", 17: "UDP" };
 
@@ -34,7 +35,7 @@ export function TopFlows({ flows, leakPort }: { flows: TopFlow[]; leakPort?: num
               <td className="score-cell">
                 <span className="score-wrap">
                   <span className="score-track"><i style={{ width: `${Math.round(f.score * 100)}%` }} /></span>
-                  <span className="score-num">{f.score.toFixed(3)}</span>
+                  <span className="score-num">{num(f.score, 3)}</span>
                 </span>
               </td>
               <td className="reason">{portHit ? "端口命中" : "分数超阈值"}</td>

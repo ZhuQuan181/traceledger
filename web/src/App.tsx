@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchHistory, fetchModels, loadRun, runDemo, runUpload } from "./api";
+import { num, pct, secs } from "./format";
 import type { ModelInfo, Payload, RunRow } from "./types";
 import { TopBar } from "./components/TopBar";
 import { ConfigRail } from "./components/ConfigRail";
@@ -149,15 +150,13 @@ export default function App() {
             <>
               <header className="head">
                 <div className="head-kicker">
-                  RUN {payload.run_id ?? "—"} <span className="dot-sep">·</span> {d.format?.format ?? "data"}{" "}
-                  <span className="dot-sep">·</span> 指纹 {d.hash}
+                  RUN {payload.run_id ?? "—"} <span className="dot-sep">·</span> {d.format?.format ?? "data"}
                 </div>
                 <h1>{d.source.replace(/（.*?）/g, "")}</h1>
                 <p className="head-sub">
                   {d.rows.toLocaleString()} 条流 <span className="dot-sep">/</span> 训练 {d.train.toLocaleString()}{" "}
                   · 测试 {d.test.toLocaleString()} <span className="dot-sep">/</span>{" "}
-                  {d.split === "temporal" ? "时间切分" : "随机切分"} <span className="dot-sep">/</span>{" "}
-                  阈值 {d.threshold.toFixed(2)}
+                  {d.split === "temporal" ? "时间切分" : "随机切分"}
                 </p>
 
                 <div className="verdict">
@@ -168,18 +167,18 @@ export default function App() {
                   <div className="v-item">
                     <span className="v-k">AUC</span>
                     <span className={`v-v ${suspicious ? "caution" : ""}`}>
-                      {best.metrics.auc == null ? "—" : best.metrics.auc.toFixed(4)}
+                      {num(best.metrics.auc)}
                       {suspicious && <span className="v-flag">待复核</span>}
                     </span>
                   </div>
                   <div className="v-item">
                     <span className="v-k">F1</span>
-                    <span className="v-v">{best.metrics.f1.toFixed(4)}</span>
+                    <span className="v-v">{num(best.metrics.f1)}</span>
                   </div>
                   <div className="v-item">
                     <span className="v-k">误报率</span>
                     <span className="v-v mono">
-                      {best.metrics.fpr == null ? "—" : `${(best.metrics.fpr * 100).toFixed(2)}%`}
+                      {pct(best.metrics.fpr)}
                     </span>
                   </div>
                   <div className="v-note">
