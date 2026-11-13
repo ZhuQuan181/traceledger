@@ -73,6 +73,11 @@ def build_parser() -> argparse.ArgumentParser:
     cm = sub.add_parser("compare", help="对比多次实验的最佳指标")
     cm.add_argument("run_ids", nargs="+")
 
+    sm = sub.add_parser("sample", help="生成一份样例 CSV，用来试跑或给同事")
+    sm.add_argument("--rows", type=int, default=2000)
+    sm.add_argument("--out", type=Path, default=Path("sample_flows.csv"))
+    sm.add_argument("--leaky", action="store_true", help="生成带端口泄漏的极端样例")
+
     sub.add_parser("formats", help="列出支持的数据格式")
     sub.add_parser("models", help="列出已注册模型")
     return p
@@ -113,6 +118,18 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.cmd is None:
         build_parser().print_help()
+        return 0
+
+    if args.cmd == "sample":
+        from flowlab.schema import normalize_columns
+        from flowlab.synthetic import generate
+        n_attack = max(10, args.rows // 10)
+        df = normalize_columns(generate(n_normal=args.rows - n_attack, n_attack=n_attack,
+                                        seed=42, leakage_only=args.leaky))
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(args.out, index=False)
+        print(f"样例已写入 {args.out}（{len(df):,} 行，{n_attack:,} 条攻击）")
+        print(f"下一步：uv run flowlab run {args.out} --split temporal --html out/sample.html")
         return 0
 
     if args.cmd == "formats":

@@ -10,9 +10,11 @@
 ## 快速开始
 
 ```bash
+# 0) 没有 uv 先装：https://docs.astral.sh/uv/getting-started/installation/
 cd /mnt/data/flowlab
-uv sync --extra dev --extra api
+uv sync --extra dev --extra api --extra data
 
+uv run flowlab sample --rows 2000          # 生成一份样例 CSV（可直接给同事）
 uv run flowlab demo                        # 合成数据跑一次
 uv run flowlab demo --report out/report.md # 同时生成报告
 uv run flowlab run my.csv --split temporal # 跑自己的 CSV（需要 label 列）
@@ -39,6 +41,7 @@ pcap 需要本机 `tshark`（Ubuntu: `sudo apt install tshark`）。
 | `flowlab score FILE` | 无标签数据的无监督排序，输出最可疑的流 |
 | `flowlab run FILE --labels L` | pcap 旁挂标签（flow_id / 五元组 / 行序三种对齐） |
 | `flowlab serve` | 本地 Web 工作台 |
+| `flowlab sample` | 生成样例 CSV，用来试跑或分发 |
 | `flowlab formats` | 列出支持的数据格式 |
 | `flowlab models` | 列出已注册模型 |
 | `flowlab history` | 最近的实验（本地 SQLite，`~/.flowlab/flowlab.db`） |
