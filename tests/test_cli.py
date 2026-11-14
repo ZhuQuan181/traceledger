@@ -1,6 +1,25 @@
 import json
 
-from flowlab.cli import main
+from flowlab.cli import build_parser, main
+
+
+def test_all_argparse_help_strings_are_valid():
+    seen: set[int] = set()
+
+    def visit(parser):
+        if id(parser) in seen:
+            return
+        seen.add(id(parser))
+        formatter = parser._get_formatter()
+        for action in parser._actions:
+            if action.help:
+                formatter._expand_help(action)
+            choices = getattr(action, "choices", None)
+            if isinstance(choices, dict):
+                for child in choices.values():
+                    visit(child)
+
+    visit(build_parser())
 
 
 def test_help_exits_zero():

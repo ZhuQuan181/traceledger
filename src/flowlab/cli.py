@@ -43,7 +43,7 @@ def _add_run_flags(p: argparse.ArgumentParser) -> None:
         "--target-fpr",
         type=float,
         default=0.01,
-        help="threshold-mode=fpr 时的目标误报率，例如 0.01 表示 1%",
+        help="threshold-mode=fpr 时的目标误报率，例如 0.01 表示百分之一",
     )
     p.add_argument("--json", action="store_true")
     p.add_argument("--report", type=Path, help="Markdown 报告输出路径")
