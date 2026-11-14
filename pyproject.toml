@@ -4,16 +4,16 @@ version = "0.7.0"
 description = "FlowLab - 流量异常检测研究/实验工作台"
 requires-python = ">=3.11"
 dependencies = [
-  "pandas>=2.2",
-  "numpy>=1.26",
-  "scikit-learn>=1.5",
-  "pyyaml>=6",
+  "pandas>=3.1.1",
+  "numpy>=2.4.6",
+  "scikit-learn>=1.9.1",
+  "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.8", "httpx2>=2.16"]
-api = ["fastapi>=0.115", "uvicorn>=0.32", "python-multipart>=0.0.12"]
-data = ["pyarrow>=15", "openpyxl>=3.1", "xlrd>=2.0"]
+dev = ["pytest>=9.2.0", "ruff>=0.17.4", "httpx2>=2.16"]
+api = ["fastapi>=0.162.4", "uvicorn>=0.54.0", "python-multipart>=0.0.33"]
+data = ["pyarrow>=26.0.1", "openpyxl>=3.1.5", "xlrd>=2.0.2"]
 
 [project.scripts]
 flowlab = "flowlab.cli:main"
