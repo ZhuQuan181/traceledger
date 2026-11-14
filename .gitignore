@@ -2,7 +2,12 @@
 __pycache__/
 *.pyc
 out/
+dist/
+build/
 .pytest_cache/
 .ruff_cache/
 node_modules/
 web/dist/
+*.tsbuildinfo
+.serena/
+.DS_Store

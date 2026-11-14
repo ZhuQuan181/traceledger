@@ -1,0 +1,15 @@
+services:
+  flowlab:
+    build: .
+    image: flowlab:0.6.0
+    ports:
+      - "127.0.0.1:8765:8765"
+    environment:
+      FLOWLAB_HOME: /data
+      FLOWLAB_MAX_UPLOAD_MB: "1024"
+    volumes:
+      - flowlab-data:/data
+    restart: unless-stopped
+
+volumes:
+  flowlab-data:

@@ -14,6 +14,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  quality:
+    name: Quality · Ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: latest
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --extra dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
   backend:
     name: Backend · Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
@@ -61,5 +76,84 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run component tests
+        run: npm test
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
       - name: Build production bundle
         run: npm run build
+
+  wheel:
+    name: Package · wheel smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build frontend into the wheel
+        working-directory: web
+        run: npm ci && npm run build
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: latest
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Build and inspect wheel
+        run: |
+          uv build
+          uv run python - <<'PY'
+          import glob
+          import zipfile
+
+          wheel = glob.glob("dist/*.whl")[0]
+          with zipfile.ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+          assert "flowlab/web/index.html" in names, "wheel 缺少 Web UI"
+          assert any(name.endswith(".js") for name in names if name.startswith("flowlab/web/assets/"))
+          print(wheel, "contains packaged Web UI")
+          PY
+
+      - name: Install wheel and run smoke test
+        run: |
+          WHEEL=$(ls dist/*.whl | head -n 1)
+          uv venv /tmp/flowlab-wheel
+          uv pip install --python /tmp/flowlab-wheel/bin/python "${WHEEL}[api]"
+          /tmp/flowlab-wheel/bin/flowlab demo --normal 120 --attack 20 --models mlp --no-save
+          /tmp/flowlab-wheel/bin/python - <<'PY'
+          from pathlib import Path
+          from flowlab.api.main import _DIST
+
+          assert (Path(_DIST) / "index.html").is_file()
+          print("installed wheel serves", _DIST)
+          PY
+
+  container:
+    name: Container · Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t flowlab:ci .
+      - name: Start container and check health
+        run: |
+          docker run -d --name flowlab-ci -p 127.0.0.1:8765:8765 flowlab:ci
+          trap 'docker logs flowlab-ci || true; docker rm -f flowlab-ci || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8765/api/health >/tmp/flowlab-health.json; then
+              break
+            fi
+            sleep 1
+          done
+          cat /tmp/flowlab-health.json
+          grep -q '"ok":true' /tmp/flowlab-health.json
+          curl -fsS -o /dev/null http://127.0.0.1:8765/
