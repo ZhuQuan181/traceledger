@@ -4,7 +4,13 @@
   uv run python scripts/make_test_pcap.py out.pcap --flows 60
   # 生成 out.pcap 与 out.pcap.labels.csv（五元组对齐）
 """
-import argparse, csv, ipaddress, random, struct, time
+
+import argparse
+import csv
+import ipaddress
+import random
+import struct
+import time
 
 
 def ip4(s):
@@ -14,7 +20,9 @@ def ip4(s):
 def frame(src, dst, proto, l4_bytes):
     eth = bytes.fromhex("bb" * 6) + bytes.fromhex("aa" * 6) + struct.pack("!H", 0x0800)
     total = 20 + len(l4_bytes)
-    hdr = struct.pack("!BBHHHBBH4s4s", 0x45, 0, total, 0x1234, 0x4000, 64, proto, 0, ip4(src), ip4(dst))
+    hdr = struct.pack(
+        "!BBHHHBBH4s4s", 0x45, 0, total, 0x1234, 0x4000, 64, proto, 0, ip4(src), ip4(dst)
+    )
     return eth + hdr + l4_bytes
 
 
@@ -39,7 +47,7 @@ def main():
     packets, labels = [], []
 
     for i in range(a.flows):
-        attack = (i % 7 == 3)   # 每 7 条一条攻击，保证时间上均匀分布
+        attack = i % 7 == 3  # 每 7 条一条攻击，保证时间上均匀分布
         src = f"10.0.0.{rng.randint(1, 60)}"
         dst = f"192.168.1.{rng.randint(1, 60)}"
         sport = rng.randint(20000, 60000)
@@ -51,8 +59,16 @@ def main():
         for k in range(n_pkts):
             payload = udp(sport, dport, size) if proto == 17 else tcp(sport, dport, size)
             packets.append((t0 + k, 0, frame(src, dst, proto, payload)))
-        labels.append({"src_ip": src, "dst_ip": dst, "src_port": sport, "dst_port": dport,
-                       "protocol": proto, "label": "DDoS" if attack else "BENIGN"})
+        labels.append(
+            {
+                "src_ip": src,
+                "dst_ip": dst,
+                "src_port": sport,
+                "dst_port": dport,
+                "protocol": proto,
+                "label": "DDoS" if attack else "BENIGN",
+            }
+        )
 
     packets.sort(key=lambda p: p[0])
     with open(a.out, "wb") as f:

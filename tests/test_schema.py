@@ -19,3 +19,10 @@ def test_duplicate_after_mapping_dropped():
     df = pd.DataFrame({"dst_port": [1], "Destination Port": [2]})
     out = normalize_columns(df)
     assert list(out.columns) == ["dst_port"]
+
+
+def test_common_label_aliases_map_to_standard_column():
+    for alias in ("class", "target", "attack", "is_attack", "anomaly", "labels", "y"):
+        out = normalize_columns(pd.DataFrame({alias: [0, 1], "feature": [1, 2]}))
+        assert "label" in out.columns, alias
+        assert alias not in out.columns, alias

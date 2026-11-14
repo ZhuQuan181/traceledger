@@ -5,6 +5,7 @@
 2. time_leak  —— 有时间戳却用随机切分（未来信息进训练集）
 3. port_leak  —— 某个端口在某类攻击里占比 > 90%（模型学到的是端口，不是行为）
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -87,7 +88,11 @@ def detect(df: pd.DataFrame, split: str = "temporal", label_col: str = "label") 
                 continue
             # 每个取值对应的标签是否唯一
             grouped = df.groupby(col, dropna=True)[label_col].nunique(dropna=True)
-            if len(grouped) and (grouped <= 1).mean() >= 0.95 and len(grouped) <= max(20, n_classes):
+            if (
+                len(grouped)
+                and (grouped <= 1).mean() >= 0.95
+                and len(grouped) <= max(20, n_classes)
+            ):
                 warns.append(
                     {
                         "rule": "target_leak",

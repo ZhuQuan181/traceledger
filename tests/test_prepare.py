@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 
 from flowlab.features.prepare import build_matrix, build_matrix_pair
 from flowlab.schema import normalize_columns
@@ -33,3 +34,22 @@ def test_pair_uses_train_statistics():
     assert a.X.shape[0] == 250
     assert b.X.shape[0] == len(te)
     assert a.feature_names == b.feature_names
+
+
+def test_infinity_is_treated_as_missing():
+    df = _df().copy()
+    df.loc[df.index[0], "bytes_per_s"] = np.inf
+    df.loc[df.index[1], "packets_per_s"] = -np.inf
+    p = build_matrix(df)
+    assert np.isfinite(p.X).all()
+
+
+def test_infinity_in_object_numeric_column_is_sanitized():
+    df = pd.DataFrame(
+        {
+            "label": ["BENIGN", "ATTACK"] * 20,
+            "feature": ["inf", 1.0, "1.5", 2.0] * 10,
+        }
+    )
+    p = build_matrix(df)
+    assert np.isfinite(p.X).all()

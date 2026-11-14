@@ -5,6 +5,7 @@
 - tshark 不在时抛 PcapUnavailable，并给出安装提示（不自动装软件）。
 - 无标签 —— pcap 通常没有 ground truth，因此走 score/解释路径而不是评估路径。
 """
+
 from __future__ import annotations
 
 import shutil
@@ -76,59 +77,126 @@ def parse_tshark_output(text: str) -> pd.DataFrame:
             )
         except ValueError:
             continue
-    return pd.DataFrame(rows, columns=["ts", "src_ip", "dst_ip", "src_port", "dst_port", "bytes", "protocol"])
+    return pd.DataFrame(
+        rows, columns=["ts", "src_ip", "dst_ip", "src_port", "dst_port", "bytes", "protocol"]
+    )
 
 
 def flows_from_packets(pkts: pd.DataFrame, flow_timeout: float = 120.0) -> pd.DataFrame:
-    """按五元组 + 空闲超时聚合成流，输出与 CSV 路径相同的列名。"""
-    cols = ["Flow ID", "Source IP", "Destination IP", "Source Port", "Destination Port",
-            "Protocol", "Timestamp", "Flow Duration", "Total Fwd Packets",
-            "Total Backward Packets", "Total Length of Fwd Packets",
-            "Total Length of Bwd Packets", "Flow Bytes/s", "Flow Packets/s"]
+    """按双向五元组 + 空闲超时聚合成流，输出与 CSV 路径相同的列名。
+
+    首包方向定义为源到目的方向；反向包计入 bwd_*。若只用原始五元组分组，
+    TCP 回包会变成另一条流，backward 特征将永久为 0。
+    """
+    cols = [
+        "Flow ID",
+        "Source IP",
+        "Destination IP",
+        "Source Port",
+        "Destination Port",
+        "Protocol",
+        "Timestamp",
+        "Flow Duration",
+        "Total Fwd Packets",
+        "Total Backward Packets",
+        "Total Length of Fwd Packets",
+        "Total Length of Bwd Packets",
+        "Flow Bytes/s",
+        "Flow Packets/s",
+    ]
     if pkts.empty:
         return pd.DataFrame(columns=cols)
 
     pkts = pkts.sort_values("ts", kind="mergesort")
+    active: dict[tuple, dict] = {}
     rows: list[dict] = []
-    for (src, dst, sport, dport, proto), g in pkts.groupby(
-        ["src_ip", "dst_ip", "src_port", "dst_port", "protocol"], sort=False
-    ):
-        start = last = None
-        npkts = nbytes = 0
-        for ts, b in zip(g["ts"].to_numpy(), g["bytes"].to_numpy()):
-            if start is None or ts - last > flow_timeout:
-                if start is not None:
-                    rows.append(_row(src, dst, sport, dport, proto, start, last, npkts, nbytes))
-                start, npkts, nbytes = ts, 0, 0
-            last = ts
-            npkts += 1
-            nbytes += int(b)
-        rows.append(_row(src, dst, sport, dport, proto, start, last, npkts, nbytes))
+
+    def _finish(state: dict) -> None:
+        src, sport = state["src_ep"]
+        dst, dport = state["dst_ep"]
+        rows.append(
+            _row(
+                src,
+                dst,
+                sport,
+                dport,
+                state["protocol"],
+                state["start"],
+                state["last"],
+                state["fwd_packets"],
+                state["bwd_packets"],
+                state["fwd_bytes"],
+                state["bwd_bytes"],
+            )
+        )
+
+    for packet in pkts.itertuples(index=False):
+        start_ep = (str(packet.src_ip), int(packet.src_port))
+        end_ep = (str(packet.dst_ip), int(packet.dst_port))
+        protocol = int(packet.protocol)
+        endpoints = tuple(sorted((start_ep, end_ep)))
+        key = (*endpoints, protocol)
+        ts = float(packet.ts)
+        state = active.get(key)
+        if state is not None and ts - state["last"] > flow_timeout:
+            _finish(state)
+            state = None
+        if state is None:
+            state = {
+                "src_ep": start_ep,
+                "dst_ep": end_ep,
+                "protocol": protocol,
+                "start": ts,
+                "last": ts,
+                "fwd_packets": 0,
+                "bwd_packets": 0,
+                "fwd_bytes": 0,
+                "bwd_bytes": 0,
+            }
+            active[key] = state
+        forward = start_ep == state["src_ep"]
+        if forward:
+            state["fwd_packets"] += 1
+            state["fwd_bytes"] += int(packet.bytes)
+        else:
+            state["bwd_packets"] += 1
+            state["bwd_bytes"] += int(packet.bytes)
+        state["last"] = ts
+
+    for state in active.values():
+        _finish(state)
 
     rows.sort(key=lambda r: r["Timestamp"])
     for i, r in enumerate(rows):
-        r["Flow ID"] = (f"{r['Source IP']}-{r['Destination IP']}-{r['Destination Port']}"
-                        f"-{r['Protocol']}-{i}")
+        r["Flow ID"] = (
+            f"{r['Source IP']}-{r['Destination IP']}-{r['Destination Port']}-{r['Protocol']}-{i}"
+        )
     return pd.DataFrame(rows, columns=cols)
 
 
-def _row(src, dst, sport, dport, proto, start, last, npkts, nbytes) -> dict:
+def _row(
+    src, dst, sport, dport, proto, start, last, fwd_packets, bwd_packets, fwd_bytes, bwd_bytes
+) -> dict:
     dur_us = max(int((last - start) * 1e6), 1)
     dur_s = dur_us / 1e6
+    packets = fwd_packets + bwd_packets
+    nbytes = fwd_bytes + bwd_bytes
+    timestamp = pd.to_datetime(start, unit="s").strftime("%Y-%m-%d %H:%M:%S.%f")
+    timestamp = timestamp.rstrip("0").rstrip(".")
     return {
         "Source IP": src,
         "Destination IP": dst,
         "Source Port": int(sport),
         "Destination Port": int(dport),
         "Protocol": int(proto),
-        "Timestamp": pd.to_datetime(start, unit="s").strftime("%Y-%m-%d %H:%M:%S"),
+        "Timestamp": timestamp,
         "Flow Duration": dur_us,
-        "Total Fwd Packets": npkts,
-        "Total Backward Packets": 0,
-        "Total Length of Fwd Packets": nbytes,
-        "Total Length of Bwd Packets": 0,
+        "Total Fwd Packets": fwd_packets,
+        "Total Backward Packets": bwd_packets,
+        "Total Length of Fwd Packets": fwd_bytes,
+        "Total Length of Bwd Packets": bwd_bytes,
         "Flow Bytes/s": nbytes / dur_s,
-        "Flow Packets/s": npkts / dur_s,
+        "Flow Packets/s": packets / dur_s,
     }
 
 
@@ -137,4 +205,7 @@ def read_pcap(path: str | Path, flow_timeout: float = 120.0) -> pd.DataFrame:
     if not p.exists():
         raise FileNotFoundError(f"文件不存在: {p}")
     from flowlab.schema import normalize_columns
-    return normalize_columns(flows_from_packets(parse_tshark_output(_run_tshark(p)), flow_timeout=flow_timeout))
+
+    return normalize_columns(
+        flows_from_packets(parse_tshark_output(_run_tshark(p)), flow_timeout=flow_timeout)
+    )

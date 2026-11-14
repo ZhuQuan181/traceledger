@@ -1,8 +1,8 @@
 import pandas as pd
 
+from flowlab.eval.split import plan_split, split_indices
 from flowlab.schema import normalize_columns
 from flowlab.synthetic import generate
-from flowlab.eval.split import split_indices
 
 
 def _df():
@@ -22,3 +22,19 @@ def test_random_split_deterministic():
     a = split_indices(df, mode="random", seed=1)
     b = split_indices(df, mode="random", seed=1)
     assert list(a[0]) == list(b[0])
+
+
+def test_temporal_fallback_is_explicit():
+    df = _df().drop(columns=["timestamp"])
+    plan = plan_split(df, mode="temporal", seed=3)
+    assert plan.requested == "temporal"
+    assert plan.effective == "random"
+    assert plan.fell_back is True
+    assert any("退化" in message for message in plan.warnings)
+
+
+def test_benign_aliases_are_recognized_in_coverage_warnings():
+    df = _df().drop(columns=["timestamp"])
+    df["label"] = df["label"].replace({"BENIGN": "normal"})
+    plan = plan_split(df, mode="random", seed=3)
+    assert plan.warnings == []

@@ -4,18 +4,16 @@
   uv run python scripts/bench_scale.py --rows 100000
   uv run python scripts/bench_scale.py --rows 690000 --models mlp,iforest
 """
+
 from __future__ import annotations
 
 import argparse
 import time
 from pathlib import Path
 
-import pandas as pd
-
 from flowlab.engineer import add_engineered_features
 from flowlab.eval.runner import run_experiment
 from flowlab.ingest.csv import read_csv
-from flowlab.schema import normalize_columns
 from flowlab.synthetic import generate
 
 
@@ -48,8 +46,9 @@ def main() -> None:
 
     results, warns = timed(
         f"跑模型 {a.models}",
-        lambda: run_experiment(df, models=[m.strip() for m in a.models.split(",")],
-                               split=a.split, seed=42),
+        lambda: run_experiment(
+            df, models=[m.strip() for m in a.models.split(",")], split=a.split, seed=42
+        ),
     )[0]
 
     print()
@@ -60,8 +59,10 @@ def main() -> None:
     for r in results:
         m = r.metrics
         auc = "—" if m.get("auc") is None else f"{m['auc']:.4f}"
-        print(f"{r.model:<12} AUC {auc}  F1 {m['f1']:.4f}  耗时 {r.duration_s:.2f}s"
-              f"  训练 {r.n_train:,} / 测试 {r.n_test:,}")
+        print(
+            f"{r.model:<12} AUC {auc}  F1 {m['f1']:.4f}  耗时 {r.duration_s:.2f}s"
+            f"  训练 {r.n_train:,} / 测试 {r.n_test:,}"
+        )
     print()
     print(f"总耗时（不含生成）  {t_read + t_feat + sum(r.duration_s for r in results):8.2f}s")
 

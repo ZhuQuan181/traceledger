@@ -1,4 +1,5 @@
 """CSV 读取：自动识别分隔符与编码。"""
+
 from __future__ import annotations
 
 import csv
@@ -33,8 +34,9 @@ def read_csv(path: str | Path) -> pd.DataFrame:
     last_err: Exception | None = None
     for enc in _ENCODINGS:
         try:
-            df = pd.read_csv(io.BytesIO(raw), sep=sep, encoding=enc,
-                             skipinitialspace=True, low_memory=False)
+            df = pd.read_csv(
+                io.BytesIO(raw), sep=sep, encoding=enc, skipinitialspace=True, low_memory=False
+            )
             # 单列表头（如只有 label 的标注文件）也是合法 CSV
             if df.shape[1] >= 2 or (df.shape[1] == 1 and expected_cols <= 1):
                 return normalize_columns(df)

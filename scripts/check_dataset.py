@@ -3,13 +3,13 @@
 用法：
   uv run python scripts/check_dataset.py path/to/file.csv
 """
+
 from __future__ import annotations
 
 import argparse
 import sys
 
 import numpy as np
-import pandas as pd
 
 from flowlab.ingest import read_any
 from flowlab.schema import BENIGN_ALIASES, is_benign, normalize_columns
@@ -24,7 +24,7 @@ def main() -> int:
 
     try:
         df, info = read_any(a.file, allow_pickle=True)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI 边界必须把任意读取错误转成可读提示
         print(f"✗ 读取失败：{exc}")
         return 2
     df = normalize_columns(df)
@@ -51,7 +51,11 @@ def main() -> int:
             print("✗ 只有一类标签，无法做二分类评估")
             problems += 1
         if benign == 0:
-            print("✗ 没有正常样本；BENIGN 同义词集合：" + ", ".join(sorted(BENIGN_ALIASES)[:6]) + " ...")
+            print(
+                "✗ 没有正常样本；BENIGN 同义词集合："
+                + ", ".join(sorted(BENIGN_ALIASES)[:6])
+                + " ..."
+            )
             problems += 1
 
     num = df.select_dtypes(include=[np.number])
@@ -76,7 +80,9 @@ def main() -> int:
         print(f"结论：发现 {problems} 个阻断问题，先修数据再训练。")
     else:
         print("结论：可以训练。推荐命令：")
-        print(f"  uv run flowlab run {a.file} --split temporal --report out/report.md --html out/report.html")
+        print(
+            f"  uv run flowlab run {a.file} --split temporal --report out/report.md --html out/report.html"
+        )
     return 1 if problems else 0
 
 

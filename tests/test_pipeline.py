@@ -1,5 +1,3 @@
-import pandas as pd
-
 from flowlab.cli import main
 from flowlab.pipeline import load_frame
 from flowlab.synthetic import generate

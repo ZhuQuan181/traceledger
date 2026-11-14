@@ -2,6 +2,7 @@
 
 所有分支最终都走 `adapters.to_frame()`，所以形状识别逻辑只有一份。
 """
+
 from __future__ import annotations
 
 import json
@@ -17,9 +18,9 @@ from flowlab.ingest.csv import read_csv
 PICKLE_SUFFIXES = {".pkl", ".pickle", ".p"}
 
 EXTRA_HINT = {
-    ".parquet": "需要 pyarrow 或 fastparquet：uv add pyarrow",
-    ".xlsx": "需要 openpyxl：uv add openpyxl",
-    ".xls": "需要 xlrd：uv add xlrd",
+    ".parquet": "需要 pyarrow：安装 data 扩展（uv sync --extra data）",
+    ".xlsx": "需要 openpyxl：安装 data 扩展（uv sync --extra data）",
+    ".xls": "需要 xlrd：安装 data 扩展（uv sync --extra data）",
 }
 
 

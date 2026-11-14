@@ -2,6 +2,7 @@
 
 只有一条构造路径 `_fit_preprocessor()`；三个公开函数只是"怎么切 train/test"的区别。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -34,14 +35,26 @@ def _label_to_binary(labels: pd.Series) -> np.ndarray:
     return (~labels.map(is_benign)).astype(int).to_numpy()
 
 
-def _features(df: pd.DataFrame, label_col: str | None = None,
-              drop_extra: list[str] | None = None) -> pd.DataFrame:
+def _features(
+    df: pd.DataFrame, label_col: str | None = None, drop_extra: list[str] | None = None
+) -> pd.DataFrame:
     """丢掉元数据与标签，只留特征列；强制类别列转字符串。"""
     drop = (set(META_COLUMNS) | set(drop_extra or [])) & set(df.columns)
     if label_col:
         drop |= {label_col}
     feats = df.drop(columns=list(drop))
     feats = feats.loc[:, feats.notna().any(axis=0)]
+    # CSV 里的 inf 能被 pandas 正常读成浮点数，但标准化后会污染整个矩阵。
+    # 在拟合预处理器前统一当作缺失值处理，不能等到 sklearn 报错才发现。
+    feats = feats.replace([np.inf, -np.inf], np.nan)
+    feats = feats.replace(r"^\s*[+-]?(?:inf|infinity)\s*$", np.nan, regex=True)
+    feats = feats.loc[:, feats.notna().any(axis=0)]
+    numeric = [c for c in feats.columns if pd.api.types.is_numeric_dtype(feats[c])]
+    for c in feats.columns:
+        if c not in numeric:
+            # 混合类型的 object 列（例如 "inf" 与数字并存）会让 OneHotEncoder 报错；
+            # 类别列在这里统一转成字符串，保证后续编码输入一致。
+            feats[c] = feats[c].map(lambda value: np.nan if pd.isna(value) else str(value))
     for c in CATEGORICAL_FORCE & set(feats.columns):
         feats[c] = feats[c].astype(str)
     return feats
@@ -54,21 +67,43 @@ def _make_preprocessor(feats: pd.DataFrame) -> ColumnTransformer:
 
     transformers = []
     if num_cols:
-        transformers.append(("num", Pipeline([
-            ("imp", SimpleImputer(strategy="median")),
-            ("sc", StandardScaler()),
-        ]), num_cols))
+        transformers.append(
+            (
+                "num",
+                Pipeline(
+                    [
+                        ("imp", SimpleImputer(strategy="median")),
+                        ("sc", StandardScaler()),
+                    ]
+                ),
+                num_cols,
+            )
+        )
     if cat_cols:
-        transformers.append(("cat", Pipeline([
-            ("imp", SimpleImputer(strategy="most_frequent")),
-            ("oh", OneHotEncoder(handle_unknown="ignore", min_frequency=10, sparse_output=False)),
-        ]), cat_cols))
+        transformers.append(
+            (
+                "cat",
+                Pipeline(
+                    [
+                        ("imp", SimpleImputer(strategy="most_frequent")),
+                        (
+                            "oh",
+                            OneHotEncoder(
+                                handle_unknown="ignore", min_frequency=10, sparse_output=False
+                            ),
+                        ),
+                    ]
+                ),
+                cat_cols,
+            )
+        )
 
     return ColumnTransformer(transformers, remainder="drop", verbose_feature_names_out=False)
 
 
-def build_matrix(df: pd.DataFrame, label_col: str = "label",
-                 drop_extra: list[str] | None = None) -> Prepared:
+def build_matrix(
+    df: pd.DataFrame, label_col: str = "label", drop_extra: list[str] | None = None
+) -> Prepared:
     """整份数据上 fit（仅用于打分/探索；评估请用 build_matrix_pair）。"""
     if label_col not in df.columns:
         raise ValueError(f"缺少标签列 {label_col!r}，可用列: {list(df.columns)[:12]}")
@@ -77,12 +112,19 @@ def build_matrix(df: pd.DataFrame, label_col: str = "label",
         raise ValueError("没有可用特征列")
     ct = _make_preprocessor(feats)
     X = np.asarray(ct.fit_transform(feats), dtype=float)
-    return Prepared(X, _label_to_binary(df[label_col]),
-                    list(ct.get_feature_names_out()), ct, feats, list(feats.columns))
+    return Prepared(
+        X,
+        _label_to_binary(df[label_col]),
+        list(ct.get_feature_names_out()),
+        ct,
+        feats,
+        list(feats.columns),
+    )
 
 
-def build_matrix_pair(train_df: pd.DataFrame, test_df: pd.DataFrame,
-                      label_col: str = "label") -> tuple[Prepared, Prepared]:
+def build_matrix_pair(
+    train_df: pd.DataFrame, test_df: pd.DataFrame, label_col: str = "label"
+) -> tuple[Prepared, Prepared]:
     """严格版：预处理器只在训练集 fit，再 transform 测试集。"""
     if label_col not in train_df.columns or label_col not in test_df.columns:
         raise ValueError(f"缺少标签列 {label_col!r}")

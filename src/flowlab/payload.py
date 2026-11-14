@@ -1,5 +1,10 @@
 """统一的输出载荷：CLI、API、历史库共用同一份结构。"""
+
 from __future__ import annotations
+
+import hashlib
+import json
+from datetime import datetime
 
 import pandas as pd
 
@@ -8,6 +13,28 @@ from flowlab.eval.runner import EvalResult
 from flowlab.eval.verdict import judge
 from flowlab.report.html import render_html
 from flowlab.report.markdown import render_report
+
+
+def _experiment_fingerprint(
+    dataset: dict, results: list[dict], warns: list[dict], ablation: dict | None
+) -> str:
+    """指标与决策内容的稳定指纹；刻意排除耗时和生成时间。"""
+    stable_results = []
+    for row in results:
+        item = dict(row)
+        item.pop("duration_s", None)
+        stable_results.append(item)
+    core = {
+        "dataset": {
+            key: dataset.get(key)
+            for key in ("hash", "rows", "train", "test", "split", "seed", "threshold")
+        },
+        "results": stable_results,
+        "warnings": warns,
+        "ablation": ablation,
+    }
+    blob = json.dumps(core, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
 def _class_distribution(df: pd.DataFrame, label_col: str = "label", top: int = 8) -> list[dict]:
@@ -22,13 +49,18 @@ def _class_distribution(df: pd.DataFrame, label_col: str = "label", top: int = 8
     return rows
 
 
-def build_payload(df: pd.DataFrame, results: list[EvalResult], warns: list[dict],
-                  source: str, meta: dict | None = None,
-                  ablation: dict | None = None,
-                  label_col: str = "label") -> dict:
+def build_payload(
+    df: pd.DataFrame,
+    results: list[EvalResult],
+    warns: list[dict],
+    source: str,
+    meta: dict | None = None,
+    ablation: dict | None = None,
+    label_col: str = "label",
+) -> dict:
     meta = dict(meta or {})
     r0 = results[0] if results else None
-    best = max(results, key=lambda r: (r.metrics.get("auc") or 0)) if results else None
+    best = max(results, key=lambda r: r.metrics.get("auc") or 0) if results else None
 
     dataset = {
         "source": source,
@@ -37,6 +69,8 @@ def build_payload(df: pd.DataFrame, results: list[EvalResult], warns: list[dict]
         "test": r0.n_test if r0 else 0,
         "hash": r0.dataset_hash if r0 else "",
         "split": r0.split if r0 else "",
+        "split_requested": r0.split_requested if r0 else "",
+        "split_fallback": bool(r0 and r0.split_requested == "temporal" and r0.split != "temporal"),
         "threshold": r0.threshold if r0 else 0.5,
         "seed": r0.seed if r0 else 42,
         "attack_train": r0.attack_train if r0 else 0,
@@ -50,28 +84,67 @@ def build_payload(df: pd.DataFrame, results: list[EvalResult], warns: list[dict]
             "encoded": results[0].encoded_features if results else 0,
         },
     }
-    report_meta = {"source": source, "rows": len(df), "labels": dataset["labels"],
-                   "engineering": dataset["engineering"], "format": dataset["format"],
-                   "classes": dataset["classes"], "features": dataset["features"],
-                   "attack_support": dataset["attack_test"]}
+    result_dicts = [r.to_dict() for r in results]
+    recommendation_fingerprint = _experiment_fingerprint(dataset, result_dicts, warns, ablation)
+    generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    experiment = meta.get("experiment") or {
+        "source": source,
+        "split": dataset["split_requested"] or dataset["split"],
+        "split_effective": dataset["split"],
+        "command": "",
+    }
+    report_meta = {
+        "source": source,
+        "rows": len(df),
+        "labels": dataset["labels"],
+        "engineering": dataset["engineering"],
+        "format": dataset["format"],
+        "classes": dataset["classes"],
+        "features": dataset["features"],
+        "attack_support": dataset["attack_test"],
+        "investigation": (best.to_dict().get("by_label", []) if best else []),
+        "experiment": experiment,
+        "generated_at": generated_at,
+        "experiment_fingerprint": recommendation_fingerprint,
+    }
+    dataset["experiment_fingerprint"] = recommendation_fingerprint
 
-    verdict = judge(best.metrics if best else {}, warns, dataset["test"], ablation,
-                    used_features=dataset["features"]["used"])
-    report_meta["verdict"] = {"level": verdict.level, "headline": verdict.headline,
-                              "reasons": verdict.reasons, "checks": verdict.checks}
-    checklist = build_checklist(dataset, warns, ablation,
-                               unresolved_leak=verdict.level == "fail")
+    verdict = judge(
+        best.metrics if best else {},
+        warns,
+        dataset["test"],
+        ablation,
+        used_features=dataset["features"]["used"],
+        split_requested=dataset["split_requested"] or dataset["split"],
+        split_effective=dataset["split"],
+    )
+    report_meta["verdict"] = {
+        "level": verdict.level,
+        "headline": verdict.headline,
+        "reasons": verdict.reasons,
+        "checks": verdict.checks,
+    }
+    checklist = build_checklist(dataset, warns, ablation, unresolved_leak=verdict.level == "fail")
     report_meta["checklist"] = checklist
 
     return {
         "dataset": dataset,
+        "experiment": experiment,
+        "generated_at": generated_at,
+        "experiment_fingerprint": recommendation_fingerprint,
         "verdict": report_meta["verdict"],
         "checklist": checklist,
         "warnings": warns,
-        "results": [r.to_dict() for r in results],
+        "results": result_dicts,
         "best_model": best.model if best else None,
         "top_flows": best.top_flows if best else [],
         "score_curve": best.score_curve if best else [],
+        "investigation": {
+            "by_label": best.by_label if best else [],
+            "false_positives": best.false_positives if best else [],
+            "false_negatives": best.false_negatives if best else [],
+            "source_ranking": best.source_ranking if best else [],
+        },
         "ablation": ablation,
         "report_md": render_report(results, warns, report_meta, ablation=ablation),
         "report_html": render_html(results, warns, report_meta, ablation=ablation),

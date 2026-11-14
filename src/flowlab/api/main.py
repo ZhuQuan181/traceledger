@@ -2,44 +2,73 @@
 
 启动：uv run flowlab serve  →  http://127.0.0.1:8765
 """
+
 from __future__ import annotations
 
 import os
 import secrets
 import tempfile
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
+from flowlab import __version__
 from flowlab.models.registry import available
 from flowlab.pipeline import load_frame
 from flowlab.service import ExperimentSpec, demo_frame, execute
 from flowlab.store import get_run, list_runs, save_run
 
-app = FastAPI(title="FlowLab", version="0.4.0")
+app = FastAPI(title="FlowLab", version=__version__)
 
 PICKLE_TOKEN = secrets.token_urlsafe(32)
 MAX_UPLOAD_BYTES = int(os.getenv("FLOWLAB_MAX_UPLOAD_MB", "1024")) * 1024 * 1024
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
+def _origin_parts(value: str) -> tuple[str, str, int] | None:
+    """把 Origin/URL 归一成 (scheme, host, port)，默认端口也不放过。"""
+    try:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return None
+        default_port = 443 if parsed.scheme == "https" else 80
+        return parsed.scheme, parsed.hostname.lower(), parsed.port or default_port
+    except ValueError:
+        return None
+
+
 def _same_origin(origin: str, request: Request) -> bool:
-    """只信任同源页面；兼容 Vite 代理与本机回环别名。"""
-    parsed = urlparse(origin)
-    if parsed.scheme not in {"http", "https"}:
+    """严格比较 scheme + host + port；需要额外来源时用环境变量显式放行。"""
+    candidate = _origin_parts(origin)
+    expected = _origin_parts(str(request.base_url))
+    if candidate is None or expected is None:
         return False
-    origin_host = (parsed.hostname or "").lower()
-    request_host = (request.url.hostname or "").lower()
-    if not origin_host or not request_host:
-        return False
-    if origin_host == request_host:
+    if candidate == expected:
         return True
-    loopback = {"localhost", "127.0.0.1", "::1"}
-    return origin_host in loopback and request_host in loopback
+    allowed = {
+        parts
+        for value in os.getenv("FLOWLAB_ALLOWED_ORIGINS", "").split(",")
+        if value.strip()
+        for parts in [_origin_parts(value.strip())]
+        if parts is not None
+    }
+    return candidate in allowed
+
+
+def _content_length(request: Request) -> int | None:
+    raw = request.headers.get("content-length")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
 
 
 @app.middleware("http")
@@ -47,11 +76,21 @@ async def reject_cross_site_writes(request: Request, call_next):
     """阻止网页跨站触发写操作；无 Origin 的 CLI/curl 调用不受影响。"""
     if request.method in MUTATING_METHODS and request.url.path.startswith("/api/"):
         origin = request.headers.get("origin")
-        if (request.headers.get("sec-fetch-site") == "cross-site"
-                or (origin and not _same_origin(origin, request))):
+        if request.headers.get("sec-fetch-site") == "cross-site" or (
+            origin and not _same_origin(origin, request)
+        ):
             return JSONResponse(
                 {"detail": "拒绝跨站请求；请从 FlowLab 页面操作"},
                 status_code=403,
+            )
+    if request.url.path == "/api/upload":
+        # multipart 有两份可选文件（数据 + 标签），给协议开销留 1 MB 余量。
+        max_body = MAX_UPLOAD_BYTES * 2 + 1024 * 1024
+        declared = _content_length(request)
+        if declared is not None and declared > max_body:
+            return JSONResponse(
+                {"detail": f"上传请求超过上限 {max_body // (1024 * 1024)} MB"},
+                status_code=413,
             )
     return await call_next(request)
 
@@ -69,19 +108,42 @@ def _check_upload_size(file: UploadFile, label: str) -> None:
         )
 
 
+async def _save_upload(file: UploadFile, path: Path, label: str) -> int:
+    """分块写入临时文件，边写边校验，不把整个上传读进额外内存。"""
+    total = 0
+    with path.open("wb") as out:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    413,
+                    f"{label}超过上限 {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+                )
+            out.write(chunk)
+    return total
+
+
 class DemoRequest(BaseModel):
     normal: int = Field(5000, ge=100, le=200_000)
     attack: int = Field(500, ge=10, le=50_000)
-    seed: int = 42
-    split: str = "temporal"
-    models: list[str] = Field(default_factory=lambda: ["mlp", "iforest", "autoencoder"])
-    threshold: float = 0.5
+    seed: int = Field(42, ge=0, le=2**32 - 1)
+    split: Literal["temporal", "random"] = "temporal"
+    test_size: float = Field(0.3, ge=0.05, le=0.5)
+    models: list[str] = Field(
+        default_factory=lambda: ["mlp", "iforest", "autoencoder"], min_length=1
+    )
+    threshold: float = Field(0.5, ge=0, le=1)
     ablate: str | None = None
     leaky: bool = False
     save: bool = True
 
 
 def _validate(models: list[str]) -> None:
+    if not models:
+        raise HTTPException(400, "至少选择一个模型")
     unknown = [m for m in models if m not in available()]
     if unknown:
         raise HTTPException(400, f"未知模型: {unknown}，可用: {available()}")
@@ -89,18 +151,20 @@ def _validate(models: list[str]) -> None:
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "models": available(), "version": "0.4.0"}
+    return {"ok": True, "models": available(), "version": __version__}
 
 
 @app.get("/api/models")
 def models():
     from flowlab.models.registry import create
+
     return {"models": [{"name": n, "kind": create(n).kind} for n in available()]}
 
 
 @app.get("/api/formats")
 def formats():
     from flowlab.ingest import supported_formats
+
     return {"formats": supported_formats()}
 
 
@@ -114,8 +178,18 @@ def session():
 def demo(req: DemoRequest):
     _validate(req.models)
     df, meta, source = demo_frame(req.normal, req.attack, req.seed, req.leaky)
-    spec = ExperimentSpec(models=req.models, split=req.split, seed=req.seed,
-                          threshold=req.threshold, ablate=req.ablate)
+    spec = ExperimentSpec(
+        models=req.models,
+        split=req.split,
+        seed=req.seed,
+        threshold=req.threshold,
+        test_size=req.test_size,
+        ablate=req.ablate,
+        source_kind="demo",
+        normal=req.normal,
+        attack=req.attack,
+        leaky=req.leaky,
+    )
     try:
         payload = execute(df, meta, source, spec)
     except ValueError as exc:
@@ -127,38 +201,51 @@ def demo(req: DemoRequest):
 
 
 @app.post("/api/upload")
-async def upload(file: UploadFile = File(...), labels: UploadFile | None = File(None),
-                 split: str = Form("temporal"), models: str = Form("mlp,iforest,autoencoder"),
-                 threshold: float = Form(0.5), seed: int = Form(42),
-                 ablate: str = Form(""), allow_pickle: bool = Form(False),
-                 save: bool = Form(True),
-                 pickle_token: str | None = Header(None, alias="X-FlowLab-Pickle-Token")):
+async def upload(
+    file: UploadFile = File(...),
+    labels: UploadFile | None = File(None),
+    split: str = Form("temporal"),
+    models: str = Form("mlp,iforest,autoencoder"),
+    threshold: float = Form(0.5),
+    seed: int = Form(42),
+    test_size: float = Form(0.3),
+    ablate: str = Form(""),
+    allow_pickle: bool = Form(False),
+    save: bool = Form(True),
+    pickle_token: str | None = Header(None, alias="X-FlowLab-Pickle-Token"),
+):
     mlist = [m.strip() for m in models.split(",") if m.strip()]
     _validate(mlist)
+    if split not in {"temporal", "random"}:
+        raise HTTPException(400, "split 只能是 temporal 或 random")
+    if not 0 <= threshold <= 1:
+        raise HTTPException(400, "threshold 应在 0~1 之间")
+    if not 0.05 <= test_size <= 0.5:
+        raise HTTPException(400, "test_size 应在 0.05~0.5 之间")
+    if not 0 <= seed <= 2**32 - 1:
+        raise HTTPException(400, "seed 超出允许范围")
     if allow_pickle:
         _check_pickle_token(pickle_token)
     _check_upload_size(file, "数据文件")
 
     name = file.filename or "upload"
-    suffix = Path(name).suffix.lower()
-    data = await file.read()
-    if not data:
-        raise HTTPException(400, "文件为空")
-
+    safe_name = Path(name).name or "upload.csv"
     with tempfile.TemporaryDirectory() as td:
-        p = Path(td) / f"upload{suffix or '.csv'}"
-        p.write_bytes(data)
+        p = Path(td) / f"data-{safe_name}"
+        if await _save_upload(file, p, "数据文件") == 0:
+            raise HTTPException(400, "文件为空")
         lab_path = None
         if labels is not None:
             _check_upload_size(labels, "标签文件")
-            lab_data = await labels.read()
-            if lab_data:
-                lab_path = Path(td) / f"labels{Path(labels.filename or 'labels.csv').suffix or '.csv'}"
-                lab_path.write_bytes(lab_data)
+            label_name = Path(labels.filename or "labels.csv").name or "labels.csv"
+            candidate = Path(td) / f"labels-{label_name}"
+            if await _save_upload(labels, candidate, "标签文件"):
+                lab_path = candidate
         try:
             from flowlab.ingest.pcap import PcapUnavailable
+
             try:
-                loaded = load_frame(p, lab_path, allow_pickle=allow_pickle)
+                loaded = await run_in_threadpool(load_frame, p, lab_path, allow_pickle=allow_pickle)
             except PcapUnavailable as exc:
                 raise HTTPException(400, str(exc)) from exc
             df, meta = loaded.df, loaded.meta()
@@ -176,32 +263,45 @@ async def upload(file: UploadFile = File(...), labels: UploadFile | None = File(
             "上传一个标签 CSV（五元组 / flow_id / 行序对齐），或改用 score 命令做无监督排序。",
         )
 
-    spec = ExperimentSpec(models=mlist, split=split, seed=seed,
-                          threshold=threshold, ablate=ablate or None)
+    spec = ExperimentSpec(
+        models=mlist,
+        split=split,
+        seed=seed,
+        threshold=threshold,
+        test_size=test_size,
+        ablate=ablate or None,
+        source_kind="upload",
+        source_ref=name,
+    )
     try:
-        payload = execute(df, meta, name, spec)
+        payload = await run_in_threadpool(execute, df, meta, name, spec)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
     if allow_pickle:
-        payload["warnings"].append({
-            "rule": "pickle_unsafe", "columns": [], "severity": "medium",
-            "message": "该文件以 pickle 加载，反序列化会执行代码；请只加载自己生成的文件。",
-            "suggestion": "分享数据时优先用 parquet / npz / csv。",
-        })
+        payload["warnings"].append(
+            {
+                "rule": "pickle_unsafe",
+                "columns": [],
+                "severity": "medium",
+                "message": "该文件以 pickle 加载，反序列化会执行代码；请只加载自己生成的文件。",
+                "suggestion": "分享数据时优先用 parquet / npz / csv。",
+            }
+        )
     if save:
         payload["run_id"] = save_run(payload)
     return payload
 
 
 @app.get("/api/history")
-def history(limit: int = 20):
+def history(limit: int = Query(20, ge=1, le=100)):
     return {"runs": list_runs(limit)}
 
 
 @app.delete("/api/history")
-def history_prune(keep: int = 50):
+def history_prune(keep: int = Query(50, ge=1, le=5000)):
     from flowlab.store import count, prune
+
     removed = prune(keep)
     return {"deleted": removed, "remaining": count()}
 
@@ -232,6 +332,8 @@ def history_md(run_id: str):
     return rec["payload"].get("report_md", "")
 
 
-_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
+_PACKAGED_DIST = Path(__file__).resolve().parent.parent / "web"
+_REPO_DIST = Path(__file__).resolve().parents[3] / "web" / "dist"
+_DIST = _PACKAGED_DIST if _PACKAGED_DIST.exists() else _REPO_DIST
 if _DIST.exists():
     app.mount("/", StaticFiles(directory=str(_DIST), html=True), name="web")

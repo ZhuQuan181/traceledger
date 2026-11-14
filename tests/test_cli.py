@@ -11,3 +11,25 @@ def test_demo_runs(capsys):
     assert code == 0
     assert "模型对比" in out
     assert "mlp" in out
+    assert "PR-AUC" in out
+
+
+def test_invalid_ablation_returns_clean_error(capsys):
+    code = main(
+        [
+            "demo",
+            "--normal",
+            "300",
+            "--attack",
+            "40",
+            "--models",
+            "mlp",
+            "--ablate",
+            "label",
+            "--no-save",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "实验失败" in captured.err
+    assert "Traceback" not in captured.err

@@ -31,3 +31,36 @@ def test_reports_mention_classes_and_features():
     assert "参与训练的特征" in p["report_md"]
     assert "类别分布" in p["report_html"]
     assert 'class="feat"' in p["report_html"]
+
+
+def test_report_uses_real_source_command_and_stable_fingerprint():
+    df = add_engineered_features(normalize_columns(generate(400, 60, seed=2)))
+    meta = {"labels": {"mode": "embedded"}}
+    spec = ExperimentSpec(models=["mlp"], source_kind="file", source_ref="flows.csv")
+    first = execute(df, meta, "flows.csv（csv）", spec)
+    second = execute(df, meta, "flows.csv（csv）", spec)
+    assert "flowlab run flows.csv" in first["experiment"]["command"]
+    assert "flowlab demo" not in first["report_md"]
+    assert first["experiment_fingerprint"] == second["experiment_fingerprint"]
+    assert "逐位一致" not in first["report_md"]
+    assert "报告含生成时间，文件字节不保证完全相同" in first["report_md"]
+    assert "PR-AUC" in first["report_html"]
+    assert 'class="table-scroll"' in first["report_html"]
+
+
+def test_suspicious_badge_follows_verdict():
+    from flowlab.report.view import build_view
+    from flowlab.service import results_of
+
+    p = _payload()
+    meta = {
+        "labels": {"mode": "embedded"},
+        "verdict": {
+            "level": "ok",
+            "checks": [
+                {"name": "指标可信度", "status": "pass", "detail": "AUC 1.0000，消融已排除端口"}
+            ],
+        },
+    }
+    view = build_view(results_of(p), p["warnings"], meta, p["ablation"])
+    assert view.suspicious_auc is False

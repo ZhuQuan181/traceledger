@@ -1,4 +1,3 @@
-import pandas as pd
 import pytest
 
 from flowlab.ingest.csv import read_csv

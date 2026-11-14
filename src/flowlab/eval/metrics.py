@@ -1,9 +1,17 @@
-"""指标计算：AUC / F1 / 精确率 / 召回率 / 误报率 / 混淆矩阵。"""
+"""指标计算：ROC-AUC / PR-AUC / F1 / 精确率 / 召回率 / 误报率 / 混淆矩阵。"""
+
 from __future__ import annotations
 
 import numpy as np
-from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score,
-                             precision_score, recall_score, roc_auc_score)
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
 
 
 def compute_metrics(y_true: np.ndarray, scores: np.ndarray, threshold: float = 0.5) -> dict:
@@ -15,12 +23,21 @@ def compute_metrics(y_true: np.ndarray, scores: np.ndarray, threshold: float = 0
         auc = float(roc_auc_score(y_true, scores)) if len(np.unique(y_true)) > 1 else float("nan")
     except ValueError:
         auc = float("nan")
+    try:
+        pr_auc = (
+            float(average_precision_score(y_true, scores))
+            if len(np.unique(y_true)) > 1
+            else float("nan")
+        )
+    except ValueError:
+        pr_auc = float("nan")
 
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
     fpr = float(fp / (fp + tn)) if (fp + tn) else float("nan")
 
     return {
         "auc": round(auc, 4) if auc == auc else None,
+        "pr_auc": round(pr_auc, 4) if pr_auc == pr_auc else None,
         "accuracy": round(float(accuracy_score(y_true, y_pred)), 4),
         "precision": round(float(precision_score(y_true, y_pred, zero_division=0)), 4),
         "recall": round(float(recall_score(y_true, y_pred, zero_division=0)), 4),

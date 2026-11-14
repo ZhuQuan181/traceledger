@@ -4,6 +4,7 @@
 目的端口集中到 3333，用于演示端口泄漏与消融。
 时间戳仍可用于演示随机切分带来的未来信息泄漏。
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -34,8 +35,11 @@ def generate(
 
     # 时长（微秒）：正常流长尾；攻击流短（leakage_only 时与正常同分布）
     benign_dur = np.clip(rng.lognormal(13.0, 1.4, n), 1_000, 3.6e9)
-    duration = (np.clip(rng.lognormal(13.0, 1.4, n), 1_000, 3.6e9) if leakage_only
-                else np.where(is_attack, rng.integers(1_000, 120_000, n), benign_dur)).astype(np.int64)
+    duration = (
+        np.clip(rng.lognormal(13.0, 1.4, n), 1_000, 3.6e9)
+        if leakage_only
+        else np.where(is_attack, rng.integers(1_000, 120_000, n), benign_dur)
+    ).astype(np.int64)
 
     # 包数 / 字节数
     if leakage_only:
@@ -61,14 +65,20 @@ def generate(
         flip = is_attack & (rng.random(n) < 0.04)
         dst_port = np.where(flip, rng.choice(NORMAL_PORTS, n), dst_port)
 
-    protocol = (rng.choice([6, 6, 6, 17], n) if leakage_only
-                else np.where(is_attack, 17, rng.choice([6, 6, 6, 17], n)))
+    protocol = (
+        rng.choice([6, 6, 6, 17], n)
+        if leakage_only
+        else np.where(is_attack, 17, rng.choice([6, 6, 6, 17], n))
+    )
 
     ts = rng.uniform(1_700_000_000, 1_700_086_400, n)  # 每行独立采样，避免标签与时间相关
 
     df = pd.DataFrame(
         {
-            "Flow ID": [f"2026-11-11 10:00:{i % 60:02d} 10.0.0.{i % 250}.1-10.0.0.{(i * 7) % 250}.9-{int(dst_port[i])}-6" for i in range(n)],
+            "Flow ID": [
+                f"2026-11-11 10:00:{i % 60:02d} 10.0.0.{i % 250}.1-10.0.0.{(i * 7) % 250}.9-{int(dst_port[i])}-6"
+                for i in range(n)
+            ],
             "Source IP": [f"10.0.0.{int(x)}" for x in rng.integers(0, 250, n)],
             "Destination IP": [f"192.168.1.{int(x)}" for x in rng.integers(0, 250, n)],
             "Source Port": rng.integers(10000, 65000, n),

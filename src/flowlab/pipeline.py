@@ -2,6 +2,7 @@
 
 CLI 与 API 都必须走这里，避免两条路径的特征不一致。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -24,12 +25,17 @@ class LoadedFrame:
     format_info: dict = field(default_factory=dict)
 
     def meta(self) -> dict:
-        return {"source": self.source, "labels": self.label_info,
-                "engineering": self.engineering, "format": self.format_info}
+        return {
+            "source": self.source,
+            "labels": self.label_info,
+            "engineering": self.engineering,
+            "format": self.format_info,
+        }
 
 
-def load_frame(path: str | Path, labels_path: str | Path | None = None,
-               allow_pickle: bool = False) -> LoadedFrame:
+def load_frame(
+    path: str | Path, labels_path: str | Path | None = None, allow_pickle: bool = False
+) -> LoadedFrame:
     p = Path(path)
     df, fmt = read_any(p, allow_pickle=allow_pickle)
     df = normalize_columns(df)
@@ -40,9 +46,14 @@ def load_frame(path: str | Path, labels_path: str | Path | None = None,
         df, info = attach_labels(df, sidecar)
         info["file"] = str(sidecar)
     elif "label" in df.columns:
-        info = {"mode": "embedded", "labelled": int(df["label"].notna().sum()),
-                "total": len(df), "matches": int(df["label"].notna().sum())}
+        info = {
+            "mode": "embedded",
+            "labelled": int(df["label"].notna().sum()),
+            "total": len(df),
+            "matches": int(df["label"].notna().sum()),
+        }
 
     df = add_engineered_features(df)
-    return LoadedFrame(df=df, source=f"{p.name}（{fmt.get('format', p.suffix)}）",
-                       label_info=info, format_info=fmt)
+    return LoadedFrame(
+        df=df, source=f"{p.name}（{fmt.get('format', p.suffix)}）", label_info=info, format_info=fmt
+    )

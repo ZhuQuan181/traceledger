@@ -1,8 +1,8 @@
 """单文件 HTML 报告：只做排版，所有数值来自 ReportView。"""
+
 from __future__ import annotations
 
 import html
-from datetime import datetime
 
 from flowlab.eval.runner import EvalResult
 from flowlab.report.view import ReportView, build_view
@@ -15,10 +15,12 @@ body{margin:0;padding:56px 40px 72px;background:var(--paper);color:var(--ink);
 font:14px/1.65 "Inter","PingFang SC","Microsoft YaHei",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 .wrap{max-width:1000px;margin:0 auto}
 .mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums}
+.table-scroll{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
 h1{font-family:"Newsreader",Georgia,serif;font-weight:400;font-size:36px;line-height:1.15;
 letter-spacing:-.015em;margin:0 0 4px}
 h2{font-family:"Newsreader",Georgia,serif;font-weight:400;font-size:23px;margin:44px 0 14px}
 h2 .idx{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);margin-right:10px;vertical-align:2px}
+h3{font-size:14px;font-weight:600;margin:22px 0 8px;color:var(--ink2)}
 .sub{color:var(--ink2);font-size:13px;margin:0}
 .kicker{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink2);margin:0 0 4px}
 .band{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--ink);
@@ -68,6 +70,8 @@ display:grid;place-items:center;font-size:9px;line-height:1;color:#fff}
 .sc-list li.todo .ck-item{color:var(--alert)}
 .sc-list .ck-note{color:var(--muted);font-size:12px}
 table.data{width:100%;border-collapse:collapse;font-size:13px}
+table.data.wide{min-width:900px}
+table.data.flows{min-width:760px}
 table.data thead th{text-align:left;font-size:11.5px;font-weight:600;color:var(--ink2);
 padding:0 12px 9px;border-bottom:1px solid var(--rule2);white-space:nowrap}
 table.data td,table.data tbody th{padding:12px;border-bottom:1px solid var(--rule);text-align:left}
@@ -105,8 +109,34 @@ border-bottom:1px solid var(--rule);border-left:2px solid var(--rule2)}
 .feat-list{margin:12px 0 0;display:flex;flex-wrap:wrap;gap:6px}
 .feat{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink2);
 background:#f1efe9;padding:2px 6px;border-radius:2px}
+.command{white-space:pre-wrap;overflow-wrap:anywhere;padding:12px 14px;border:1px solid var(--rule);
+background:#f5f3ed;font:12px/1.6 "IBM Plex Mono",ui-monospace,Consolas,monospace}
 .foot{margin-top:44px;padding-top:14px;border-top:1px solid var(--rule);font-size:11.5px;color:var(--muted)}
-@media print{body{background:#fff;padding:0}.wrap{max-width:none}}
+@media(max-width:720px){
+body{padding:30px 16px 48px}
+h1{font-size:30px}h2{font-size:21px;margin-top:34px}
+.band{grid-template-columns:1fr 1fr}
+.band .cell{padding:15px 12px 16px 0}.band .cell+.cell{padding-left:12px}
+.band .cell:nth-child(3){border-left:0;border-top:1px solid var(--rule)}
+.band .cell:nth-child(4){border-top:1px solid var(--rule)}
+.band .v{font-size:29px}.band .v.mono{font-size:24px}
+.risk{align-items:flex-start;flex-wrap:wrap}.risk .more{margin-left:0}
+.leak{grid-template-columns:1fr;gap:5px}
+.sc-list li{grid-template-columns:16px 1fr;gap:4px 9px}
+.sc-list .ck-note{grid-column:2}
+.verdict table.check th[scope=row]{width:72px}
+.verdict table.check,.verdict table.check tbody,.verdict table.check tr{display:block}
+.verdict table.check thead{display:none}
+.verdict table.check tr{padding:8px 0;border-bottom:1px solid rgba(0,0,0,.06)}
+.verdict table.check th,.verdict table.check td{display:inline;padding:0;border:0}
+.verdict table.check td.st::before{content:" · "}
+.verdict table.check td:last-child{display:block;margin-top:2px;color:var(--muted)}
+.sigwrap{grid-template-columns:24px 1fr}.signal{height:120px}
+.cap{flex-wrap:wrap}.cap span:nth-child(2){flex-basis:100%;order:3}
+.command{font-size:11px}
+}
+@media print{body{background:#fff;padding:0}.wrap{max-width:none}
+.table-scroll{overflow:visible}table.data.wide,table.data.flows{min-width:0}}
 """
 
 
@@ -139,15 +169,16 @@ def _signal(v: ReportView) -> str:
         f'<div class="sigwrap"><div class="sigy"><span>1.0</span><span>0.5</span><span>0.0</span></div>'
         f'<div><div class="signal">{bars}'
         f'<div class="thr" style="bottom:{threshold * 100:.0f}%"><span>阈值 {threshold:.2f}</span></div>'
-        f'</div></div></div>'
+        f"</div></div></div>"
         f'<div class="cap"><span>窗口 1</span>'
-        f'<span>柱高＝该窗最高分；红色柱＝窗内 ≥20% 的流超阈值（{hits_n}/{len(v.curve)}）</span>'
-        f'<span>窗口 {len(v.curve)}</span></div>'
+        f"<span>柱高＝该窗最高分；红色柱＝窗内 ≥20% 的流超阈值（{hits_n}/{len(v.curve)}）</span>"
+        f"<span>窗口 {len(v.curve)}</span></div>"
     )
 
 
-def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
-                ablation: dict | None = None) -> str:
+def render_html(
+    results: list[EvalResult], warns: list[dict], meta: dict, ablation: dict | None = None
+) -> str:
     v = build_view(results, warns, meta, ablation)
 
     # 徽标措辞跟着结论走，避免"结论说端口无影响、表格说受泄漏影响"
@@ -163,8 +194,9 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
     model_rows = "".join(
         f'<tr class="{"best" if m.is_best else ""}">'
         f'<th scope="row" class="mono">{_e(m.model)}'
-        f'{best_tag if m.is_best else ""}</th>'
+        f"{best_tag if m.is_best else ''}</th>"
         f'<td class="muted">{_e(m.kind_cn)}</td><td class="num">{_e(m.auc)}</td>'
+        f'<td class="num">{_e(m.pr_auc)}</td>'
         f'<td class="num">{_e(m.f1)}</td><td class="num">{_e(m.precision)}</td>'
         f'<td class="num">{_e(m.recall)}</td><td class="num">{_e(m.fpr)}</td>'
         f'<td class="num muted">{_e(m.duration)}</td>'
@@ -173,13 +205,16 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
         for m in v.models
     )
 
-    warn_html = "".join(
-        f'<div class="leak {_e(w["severity"])}">'
-        f'<div><span class="rule-name">{_e(w["rule"])}</span>'
-        f'<span class="sev">{_e(w["severity"])} · {_e(", ".join(map(str, w["columns"][:2])))}</span></div>'
-        f'<div><p>{_e(w["message"])}</p><p class="fix">建议：{_e(w["suggestion"])}</p></div></div>'
-        for w in v.warnings
-    ) or '<p class="cap">未检测到明显的数据泄漏。</p>'
+    warn_html = (
+        "".join(
+            f'<div class="leak {_e(w["severity"])}">'
+            f'<div><span class="rule-name">{_e(w["rule"])}</span>'
+            f'<span class="sev">{_e(w["severity"])} · {_e(", ".join(map(str, w["columns"][:2])))}</span></div>'
+            f'<div><p>{_e(w["message"])}</p><p class="fix">建议：{_e(w["suggestion"])}</p></div></div>'
+            for w in v.warnings
+        )
+        or '<p class="cap">未检测到明显的数据泄漏。</p>'
+    )
 
     flow_rows = "".join(
         f'<tr><td class="mono">{_e(f.get("src_ip"))}</td><td class="mono">{_e(f.get("dst_ip"))}</td>'
@@ -187,9 +222,66 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
         f'<td class="mono muted">{_e(f.get("timestamp"))}</td>'
         f'<td class="num">{_e(_fmt(f.get("score", 0)))}</td>'
         f'<td class="{"bad" if str(f.get("label", "")).lower() not in {"", "benign"} else "ok"}">'
-        f'{_e(f.get("label"))}</td></tr>'
+        f"{_e(f.get('label'))}</td></tr>"
         for f in v.flows
     )
+
+    label_rows = "".join(
+        f"<tr><td>{_e(row.get('label'))}</td>"
+        f'<td class="muted">{"误报率" if row.get("kind") == "benign" else "召回率"}</td>'
+        f'<td class="num">{int(row.get("total", 0)):,}</td>'
+        f'<td class="num">{int(row.get("flagged", 0)):,}</td>'
+        f'<td class="num">{_e(_fmt(None if row.get("rate") is None else row.get("rate") * 100, 2)) + "%" if row.get("rate") is not None else "—"}</td>'
+        f"</tr>"
+        for row in v.by_label
+    )
+    source_rows = "".join(
+        f'<tr><td class="mono">{_e(row.get("src_ip"))}</td>'
+        f'<td class="num">{int(row.get("alerts", 0)):,}</td>'
+        f'<td class="num">{int(row.get("true_attacks", 0)):,}</td>'
+        f'<td class="num bad">{int(row.get("false_alarms", 0)):,}</td>'
+        f'<td class="num">{_e(_fmt(row.get("max_score"), 3))}</td></tr>'
+        for row in v.source_ranking
+    )
+
+    def _error_rows(rows: list[dict]) -> str:
+        return "".join(
+            f'<tr><td class="mono">{_e(row.get("src_ip"))}</td>'
+            f'<td class="mono">{_e(row.get("dst_ip"))}</td>'
+            f'<td class="num">{_e(row.get("dst_port"))}</td>'
+            f'<td class="num">{_e(_fmt(row.get("score"), 3))}</td>'
+            f"<td>{_e(row.get('label'))}</td></tr>"
+            for row in rows
+        )
+
+    investigation_blocks: list[str] = []
+    if label_rows:
+        investigation_blocks.append(
+            '<h3>按真实类型拆分</h3><div class="table-scroll"><table class="data">'
+            '<thead><tr><th>类型</th><th>性质</th><th class="num">样本</th>'
+            '<th class="num">判为攻击</th><th class="num">比例</th></tr></thead>'
+            f"<tbody>{label_rows}</tbody></table></div>"
+        )
+    if source_rows:
+        investigation_blocks.append(
+            '<h3>先排查的源 IP</h3><div class="table-scroll"><table class="data">'
+            '<thead><tr><th>源 IP</th><th class="num">告警</th><th class="num">真攻击</th>'
+            '<th class="num">误报</th><th class="num">最高分</th></tr></thead>'
+            f"<tbody>{source_rows}</tbody></table></div>"
+        )
+    for title, rows in (
+        ("典型漏报（攻击但未过阈值）", v.false_negatives),
+        ("典型误报（正常但被判为攻击）", v.false_positives),
+    ):
+        body = _error_rows(rows)
+        if body:
+            investigation_blocks.append(
+                f'<h3>{title}</h3><div class="table-scroll"><table class="data flows">'
+                '<thead><tr><th>源</th><th>目的</th><th class="num">端口</th>'
+                '<th class="num">分数</th><th>标签</th></tr></thead>'
+                f"<tbody>{body}</tbody></table></div>"
+            )
+    investigation_html = "".join(investigation_blocks)
 
     ab_html = ""
     if v.ablation:
@@ -198,42 +290,67 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
             f'<td class="num">{_e(_fmt(x.get("auc_with"), 4))}</td>'
             f'<td class="num">{_e(_fmt(x.get("auc_without"), 4))}</td>'
             f'<td class="num {"bad" if (x.get("delta") or 0) > 0.02 else ""}">'
-            f'{_e(_fmt(x.get("delta"), 4, signed=True))}</td></tr>'
+            f"{_e(_fmt(x.get('delta'), 4, signed=True))}</td></tr>"
             for x in v.ablation.get("rows", [])
         )
         ab_html = (
             '<h2><span class="idx">04</span>消融：去掉 '
-            f'{_e(v.ablation.get("column"))}</h2>'
-            '<table class="data"><thead><tr><th>模型</th><th class="num">AUC（含该列）</th>'
-            f'<th class="num">AUC（去掉后）</th><th class="num">Δ</th></tr></thead><tbody>{rows}</tbody></table>'
+            f"{_e(v.ablation.get('column'))}</h2>"
+            '<div class="table-scroll"><table class="data"><thead><tr><th>模型</th>'
+            '<th class="num">AUC（含该列）</th>'
+            f'<th class="num">AUC（去掉后）</th><th class="num">Δ</th></tr></thead><tbody>{rows}</tbody></table></div>'
             f'<p class="cap">{_e(v.ablation.get("note", ""))}</p>'
         )
 
-    meta_rows = "".join(f"<tr><th>{k}</th><td>{val}</td></tr>" for k, val in [
-        ("数据来源", f"{_e(v.source)}（{_e(v.fmt)}）"),
-        ("样本量", f"{v.rows}（训练 {v.train} / 测试 {v.test}）"),
-        ("攻击样本", f"训练 {v.attack_train} / 测试 {v.attack_test}"),
-        ("数据指纹", f'<span class="mono">{_e(v.hash)}</span>'),
-        ("切分方式", _e(v.split)),
-        ("随机种子", str(v.seed)),
-        ("判定阈值", v.threshold),
-        ("标签对齐", f"{_e(v.labels_mode)}（{v.labels_labelled}/{v.labels_total}）"),
-        ("速率兜底", f"{v.min_duration_ms} ms"),
-        ("类别分布", " · ".join(f"{c['label']} {c['count']:,}" for c in v.classes) or "—"),
-        ("训练特征", f"{len(v.features)} 列（编码后 {v.encoded_features} 维）"),
-        ("生成时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-    ])
+    split_text = _e(v.split)
+    if v.split_fallback:
+        split_text = "随机切分（请求时间切分，已退化）"
+    elif v.split == "temporal":
+        split_text = "时间切分"
+    elif v.split == "random":
+        split_text = "分层随机切分"
+    meta_rows = "".join(
+        f"<tr><th>{k}</th><td>{val}</td></tr>"
+        for k, val in [
+            ("数据来源", f"{_e(v.source)}（{_e(v.fmt)}）"),
+            ("样本量", f"{v.rows}（训练 {v.train} / 测试 {v.test}）"),
+            ("攻击样本", f"训练 {v.attack_train} / 测试 {v.attack_test}"),
+            ("数据指纹", f'<span class="mono">{_e(v.hash)}</span>'),
+            ("实验指纹", f'<span class="mono">{_e(v.experiment_fingerprint)}</span>'),
+            ("切分方式", split_text),
+            ("随机种子", str(v.seed)),
+            ("判定阈值", v.threshold),
+            ("标签对齐", f"{_e(v.labels_mode)}（{v.labels_labelled}/{v.labels_total}）"),
+            ("速率兜底", f"{v.min_duration_ms} ms"),
+            ("类别分布", " · ".join(f"{c['label']} {c['count']:,}" for c in v.classes) or "—"),
+            ("训练特征", f"{len(v.features)} 列（编码后 {v.encoded_features} 维）"),
+            ("生成时间", _e(v.generated_at)),
+        ]
+    )
     feature_chips = "".join(f'<code class="feat">{_e(f)}</code>' for f in v.features)
 
     risk = (
-        f'<div class="risk"><span class="tag">{v.leak_count} 条泄漏</span>'
-        f'<span>{_e(v.top_warning["rule"])}：{_e(v.top_warning["message"])}</span>'
+        f'<div class="risk"><span class="tag">{v.leak_count} 条审计提示</span>'
+        f"<span>{_e(v.top_warning['rule'])}：{_e(v.top_warning['message'])}</span>"
         f'<span class="more">明细见第 03 节</span></div>'
-        if v.top_warning else ""
+        if v.top_warning
+        else ""
     )
     five = "05" if v.ablation else "04"
-    small = ('<p class="cap">⚠ 测试集不足 50 条，指标波动很大，不能当作结论。</p>'
-             if v.small_test else "")
+    command = v.reproduction_command or (
+        f"uv run flowlab demo --split {v.split_requested} --seed {v.seed} "
+        f"--threshold {v.threshold} --models {','.join(m.model for m in v.models)}"
+    )
+    source_note = (
+        "上传文件的原路径不会写入历史；复现前请重新选择同名数据与标签文件。"
+        if v.source_kind == "upload"
+        else ""
+    )
+    small = (
+        '<p class="cap">⚠ 测试集不足 50 条，指标波动很大，不能当作结论。</p>'
+        if v.small_test
+        else ""
+    )
 
     def _verdict_box() -> str:
         vd = v.verdict or {}
@@ -246,11 +363,17 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
         rows = "".join(
             f'<tr class="{c["status"]}"><th scope="row">{_e(c["name"])}</th>'
             f'<td class="st">{mark.get(c["status"], c["status"])}</td>'
-            f'<td>{_e(c["detail"])}</td></tr>'
+            f"<td>{_e(c['detail'])}</td></tr>"
             for c in (vd.get("checks") or [])
         )
-        table = (f'<table class="check"><thead><tr><th>检查项</th><th>结果</th><th>说明</th>'
-                 f'</tr></thead><tbody>{rows}</tbody></table>') if rows else ""
+        table = (
+            (
+                f'<table class="check"><thead><tr><th>检查项</th><th>结果</th><th>说明</th>'
+                f"</tr></thead><tbody>{rows}</tbody></table>"
+            )
+            if rows
+            else ""
+        )
         reasons = vd.get("reasons") or []
         # 只列不在检查表里的补充信息，避免把明细原句再抄一遍
         shown = {c["detail"] for c in (vd.get("checks") or [])}
@@ -277,12 +400,16 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
             f'<span class="ck-note">{_e(i["detail"])}</span></li>'
             for i in v.checklist
         )
-        tail = ('<p class="cap">未勾选的项补完再投稿；这些是审稿人最容易问到的。</p>'
-                if passed < len(v.checklist) else
-                '<p class="cap">全部通过，可以直接进附录。</p>')
-        return (f'<section class="selfcheck"><p class="sc-head">自查清单 '
-                f'<span class="sc-count">{passed}/{len(v.checklist)}</span></p>'
-                f'<ul class="sc-list">{rows}</ul>{tail}</section>')
+        tail = (
+            '<p class="cap">未勾选的项补完再投稿；这些是审稿人最容易问到的。</p>'
+            if passed < len(v.checklist)
+            else '<p class="cap">全部通过，可以直接进附录。</p>'
+        )
+        return (
+            f'<section class="selfcheck"><p class="sc-head">自查清单 '
+            f'<span class="sc-count">{passed}/{len(v.checklist)}</span></p>'
+            f'<ul class="sc-list">{rows}</ul>{tail}</section>'
+        )
 
     verdict_box = _verdict_box()
     checklist_box = _checklist_box()
@@ -304,8 +431,8 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
   <div class="cell"><div class="k">最佳模型</div><div class="v mono">{_e(v.best_model)}</div>
     <div class="n">{_e(v.best_kind_cn)}</div></div>
   <div class="cell"><div class="k">AUC</div>
-    <div class="v {'warn' if v.suspicious_auc else ''}">{_e(v.auc)}</div>
-    <div class="n {'warn' if v.suspicious_auc else ''}">
+    <div class="v {"warn" if v.suspicious_auc else ""}">{_e(v.auc)}</div>
+    <div class="n {"warn" if v.suspicious_auc else ""}">
       {"接近满分且存在泄漏，先看下方提示" if v.suspicious_auc else "排序能力，1 表示完美"}</div></div>
   <div class="cell"><div class="k">F1</div><div class="v">{_e(v.f1)}</div>
     <div class="n">精确率 {_e(v.precision)} · 召回率 {_e(v.recall)}</div></div>
@@ -319,10 +446,11 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
 {small}
 
 <h2><span class="idx">02</span>模型对比</h2>
-<table class="data"><thead><tr><th>模型</th><th>类型</th><th class="num">AUC</th><th class="num">F1</th>
+<div class="table-scroll"><table class="data wide"><thead><tr><th>模型</th><th>类型</th>
+<th class="num">AUC</th><th class="num">PR-AUC</th><th class="num">F1</th>
 <th class="num">精确率</th><th class="num">召回率</th><th class="num">误报率</th><th class="num">耗时</th>
 <th class="num">TP</th><th class="num">FP</th><th class="num">FN</th><th class="num">TN</th></tr></thead>
-<tbody>{model_rows}</tbody></table>
+<tbody>{model_rows}</tbody></table></div>
 
 <h2><span class="idx">03</span>数据泄漏检查</h2>
 <div class="leaks">{warn_html}</div>
@@ -330,13 +458,21 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
 {ab_html}
 
 <h2><span class="idx">{five}</span>最可疑的流</h2>
-<table class="data"><thead><tr><th>源</th><th>目的</th><th class="num">端口</th><th>协议</th>
+<div class="table-scroll"><table class="data flows"><thead><tr><th>源</th><th>目的</th>
+<th class="num">端口</th><th>协议</th>
 <th>时间</th><th class="num">分数</th><th>真实标签</th></tr></thead><tbody>{flow_rows}</tbody></table>
+</div>
 
-<h2><span class="idx">{int(five) + 1:02d}</span>实验配置</h2>
+<h2><span class="idx">{int(five) + 1:02d}</span>调查线索</h2>
+{investigation_html}
+
+<h2><span class="idx">{int(five) + 2:02d}</span>实验配置</h2>
 <table class="data">{meta_rows}</table>
 <p class="feat-list">{feature_chips}</p>
 
-<p class="foot">复现：<span class="mono">uv run flowlab demo --split {_e(v.split)} --seed {v.seed} --models {_e(','.join(m.model for m in v.models))}</span><br>
-同一数据指纹 + 同样的切分与随机种子，结果应逐位一致（浮点误差除外）。本文件自包含，可离线归档。</p>
+<h2><span class="idx">{int(five) + 3:02d}</span>复现方式</h2>
+<pre class="command">{_e(command)}</pre>
+<p class="foot">数据指纹 <span class="mono">{_e(v.hash)}</span> + 切分 + 随机种子决定指标；
+实验指纹 <span class="mono">{_e(v.experiment_fingerprint)}</span> 用于核对两次实验的计算结果是否一致。
+报告含生成时间，文件字节不保证完全相同，本文件可离线归档。{(" " + _e(source_note)) if source_note else ""}</p>
 </div></body></html>"""

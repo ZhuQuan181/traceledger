@@ -1,4 +1,5 @@
 """模型插件基类：所有模型只需要实现 fit / score。"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -14,8 +15,7 @@ class Detector(ABC):
         self.params = params
 
     @abstractmethod
-    def fit(self, X: np.ndarray, y: np.ndarray) -> "Detector":
-        ...
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "Detector": ...
 
     @abstractmethod
     def score(self, X: np.ndarray) -> np.ndarray:

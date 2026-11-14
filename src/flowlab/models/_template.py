@@ -18,6 +18,7 @@
     kind = "supervised" | "unsupervised"
         supervised 会检查训练集是否有正样本；unsupervised 不做检查
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -28,7 +29,7 @@ from flowlab.models.registry import register
 
 @register("my_model")
 class MyDetector(Detector):
-    kind = "supervised"          # 改成 "unsupervised" 表示不用标签
+    kind = "supervised"  # 改成 "unsupervised" 表示不用标签
 
     def __init__(self, threshold_hint: float = 0.5, seed: int = 42, **extra):
         super().__init__(threshold_hint=threshold_hint, seed=seed, **extra)

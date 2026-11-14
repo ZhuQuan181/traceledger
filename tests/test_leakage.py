@@ -1,5 +1,3 @@
-import pandas as pd
-
 from flowlab.features.leakage import detect
 from flowlab.schema import normalize_columns
 from flowlab.synthetic import generate

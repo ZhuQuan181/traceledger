@@ -1,4 +1,5 @@
 """统一 schema：把 CICFlowMeter / Zeek / 自建 CSV 的列名映射到内部标准名。"""
+
 from __future__ import annotations
 
 import re
@@ -25,7 +26,15 @@ CANON: dict[str, str] = {
     "total_length_of_bwd_packets": "bwd_bytes",
     "flow_bytes_s": "bytes_per_s",
     "flow_packets_s": "packets_per_s",
+    # 不同数据集对标签列的叫法差异很大；统一映射后才能走同一条加载管线。
     "label": "label",
+    "labels": "label",
+    "class": "label",
+    "target": "label",
+    "attack": "label",
+    "is_attack": "label",
+    "anomaly": "label",
+    "y": "label",
 }
 
 # 不参与训练、但保留用于切分/审计的列
@@ -35,7 +44,7 @@ META_COLUMNS = {"flow_id", "src_ip", "dst_ip", "src_port", "timestamp", "label"}
 def normalize_name(name: str) -> str:
     """小写、去空白、连字符/点转下划线、压缩重复下划线。"""
     s = str(name).strip().lower()
-    s = re.sub(r"\W+", "_", s)          # 空白、连字符、斜杠、括号一律变下划线
+    s = re.sub(r"\W+", "_", s)  # 空白、连字符、斜杠、括号一律变下划线
     s = re.sub(r"_+", "_", s).strip("_")
     return s
 

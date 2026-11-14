@@ -2,6 +2,7 @@
 
 位置：$FLOWLAB_HOME/flowlab.db（默认 ~/.flowlab/flowlab.db）
 """
+
 from __future__ import annotations
 
 import json
@@ -49,7 +50,7 @@ def connect() -> sqlite3.Connection:
 def save_run(payload: dict) -> str:
     """存一份前端同构的 payload，返回 run id。"""
     results = payload.get("results") or []
-    best = max(results, key=lambda r: (r["metrics"].get("auc") or 0)) if results else None
+    best = max(results, key=lambda r: r["metrics"].get("auc") or 0) if results else None
     ds = payload.get("dataset") or {}
     rid = uuid.uuid4().hex[:10]
     with connect() as conn:
@@ -80,7 +81,8 @@ def list_runs(limit: int = 20) -> list[dict]:
     with connect() as conn:
         rows = conn.execute(
             "SELECT id,created_at,source,dataset_hash,split,rows,best_model,best_auc "
-            "FROM runs ORDER BY created_at DESC LIMIT ?", (limit,)
+            "FROM runs ORDER BY created_at DESC LIMIT ?",
+            (limit,),
         ).fetchall()
     return [dict(r) for r in rows]
 

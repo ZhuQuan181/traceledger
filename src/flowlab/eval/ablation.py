@@ -3,6 +3,7 @@
 最常用的是 `--ablate dst_port`：端口在某个攻击类里占比 96% 时，
 去掉它 AUC 从 1.0 掉到 0.6，说明模型学到的是数据集构造痕迹。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -27,12 +28,14 @@ class Ablation:
                 continue
             auc_a = r.metrics.get("auc")
             auc_b = other.metrics.get("auc")
-            rows.append({
-                "model": r.model,
-                "auc_with": auc_a,
-                "auc_without": auc_b,
-                "delta": None if (auc_a is None or auc_b is None) else round(auc_a - auc_b, 4),
-            })
+            rows.append(
+                {
+                    "model": r.model,
+                    "auc_with": auc_a,
+                    "auc_without": auc_b,
+                    "delta": None if (auc_a is None or auc_b is None) else round(auc_a - auc_b, 4),
+                }
+            )
         return rows
 
     def to_dict(self) -> dict:
@@ -54,8 +57,11 @@ def ablate(df: pd.DataFrame, column: str, **run_kwargs) -> Ablation:
 def format_table(ab) -> str:
     column = ab.column if isinstance(ab, Ablation) else ab["column"]
     rows = ab.deltas() if isinstance(ab, Ablation) else ab.get("rows", [])
-    lines = [f"== 消融：去掉 {column} ==",
-             "| 模型 | 含该列 AUC | 去掉后 AUC | Δ |", "|---|---|---|---|"]
+    lines = [
+        f"== 消融：去掉 {column} ==",
+        "| 模型 | 含该列 AUC | 去掉后 AUC | Δ |",
+        "|---|---|---|---|",
+    ]
     for row in rows:
         a = "—" if row["auc_with"] is None else f"{row['auc_with']:.4f}"
         b = "—" if row["auc_without"] is None else f"{row['auc_without']:.4f}"

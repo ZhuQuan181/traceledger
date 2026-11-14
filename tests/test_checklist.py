@@ -2,9 +2,15 @@ from flowlab.eval.checklist import build_checklist, checklist_summary
 
 
 def _ds(**kw):
-    base = {"split": "temporal", "test": 1600, "attack_test": 150,
-            "hash": "abc123", "seed": 42, "labels": {"mode": "embedded"},
-            "features": {"used": ["dst_port", "bytes_per_s", "fwd_packets"], "encoded": 5}}
+    base = {
+        "split": "temporal",
+        "test": 1600,
+        "attack_test": 150,
+        "hash": "abc123",
+        "seed": 42,
+        "labels": {"mode": "embedded"},
+        "features": {"used": ["dst_port", "bytes_per_s", "fwd_packets"], "encoded": 5},
+    }
     base.update(kw)
     return base
 
@@ -44,10 +50,20 @@ def test_hard_leak_blocks():
     assert item["ok"] is False
 
 
+def test_dropped_id_leak_does_not_contradict_passing_verdict():
+    leak = {"rule": "id_leak", "columns": ["flow_id"]}
+    items = build_checklist(
+        _ds(), [leak], {"column": "dst_port", "rows": []}, unresolved_leak=False
+    )
+    item = next(i for i in items if i["item"] == "硬泄漏已排除")
+    assert item["ok"] is True
+
+
 def test_unresolved_leak_blocks_even_if_not_hard():
     """端口泄漏把结论判成不可用时，清单不能显示全部通过。"""
-    items = build_checklist(_ds(), [_leak("port_leak")], {"column": "dst_port", "rows": []},
-                            unresolved_leak=True)
+    items = build_checklist(
+        _ds(), [_leak("port_leak")], {"column": "dst_port", "rows": []}, unresolved_leak=True
+    )
     item = next(i for i in items if i["item"] == "硬泄漏已排除")
     assert item["ok"] is False
     assert "port_leak" in item["detail"]
@@ -57,8 +73,9 @@ def test_unresolved_leak_blocks_even_if_not_hard():
 
 def test_port_leak_without_escalation_passes():
     """端口泄漏没升级成 fail 时，清单这一项算通过（由 verdict 决定是否升级）。"""
-    items = build_checklist(_ds(), [_leak("port_leak")], {"column": "dst_port", "rows": []},
-                            unresolved_leak=False)
+    items = build_checklist(
+        _ds(), [_leak("port_leak")], {"column": "dst_port", "rows": []}, unresolved_leak=False
+    )
     item = next(i for i in items if i["item"] == "硬泄漏已排除")
     assert item["ok"] is True
 

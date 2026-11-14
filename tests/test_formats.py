@@ -8,7 +8,6 @@ import pytest
 from flowlab.adapters import ShapeError
 from flowlab.ingest import read_any, supported_formats
 from flowlab.pipeline import load_frame
-from flowlab.synthetic import generate
 
 
 def test_supported_list():
@@ -71,4 +70,5 @@ def test_pipeline_with_npz_no_label_names(tmp_path):
     loaded = load_frame(p)
     assert "label" in loaded.df.columns
     assert loaded.format_info["format"] == "npz"
-    assert loaded.df["bytes_per_pkt"].notna().all()
+    # 没有任何流量计数列时不能凭空造出速率特征；加载本身应保持可用。
+    assert len(loaded.df) == 60

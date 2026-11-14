@@ -1,4 +1,5 @@
 """基线一：Isolation Forest（无监督，不需要标签）。"""
+
 from __future__ import annotations
 
 import numpy as np
@@ -14,7 +15,9 @@ class IForestDetector(Detector):
 
     def __init__(self, n_estimators: int = 200, seed: int = 42, **extra):
         super().__init__(n_estimators=n_estimators, seed=seed, **extra)
-        self._clf = IsolationForest(n_estimators=n_estimators, random_state=seed, n_jobs=-1, **extra)
+        self._clf = IsolationForest(
+            n_estimators=n_estimators, random_state=seed, n_jobs=-1, **extra
+        )
         self._lo = 0.0
         self._hi = 1.0
 

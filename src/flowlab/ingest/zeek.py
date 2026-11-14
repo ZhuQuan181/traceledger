@@ -8,6 +8,7 @@ Zeek 的 conn.log 本身就是流级别的（每条记录=一条连接），所�
 - 自定义 `#separator`（默认 \x09）
 - 缺失值 `-`、`(empty)` → NaN
 """
+
 from __future__ import annotations
 
 import csv
@@ -26,7 +27,7 @@ FIELD_MAP = {
     "id.orig_p": "src_port",
     "id.resp_p": "dst_port",
     "proto": "protocol",
-    "duration": None,      # 秒 -> 微秒，单独处理
+    "duration": None,  # 秒 -> 微秒，单独处理
     "orig_pkts": "fwd_packets",
     "resp_pkts": "bwd_packets",
     "orig_ip_bytes": "fwd_bytes",
@@ -99,7 +100,7 @@ def read_zeek(path: str | Path) -> tuple[pd.DataFrame, dict]:
 
     rows = []
     with _open(p) as f:
-        reader = csv.reader((l for l in f if not l.startswith("#")), delimiter=sep)
+        reader = csv.reader((line for line in f if not line.startswith("#")), delimiter=sep)
         for rec in reader:
             if not rec or len(rec) < 2:
                 continue
@@ -121,11 +122,18 @@ def read_zeek(path: str | Path) -> tuple[pd.DataFrame, dict]:
         s = raw[col].replace(list(MISSING), "nan")
         return pd.to_numeric(s, errors="coerce")
 
-    out["timestamp"] = pd.to_datetime(num("ts"), unit="s", errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
+    timestamps = pd.to_datetime(num("ts"), unit="s", errors="coerce")
+    out["timestamp"] = (
+        timestamps.dt.strftime("%Y-%m-%d %H:%M:%S.%f").str.rstrip("0").str.rstrip(".")
+    )
     for src, dst in (("id.orig_h", "src_ip"), ("id.resp_h", "dst_ip")):
         out[dst] = raw[src].replace(list(MISSING), "") if src in raw.columns else ""
     for src, dst in (("id.orig_p", "src_port"), ("id.resp_p", "dst_port")):
-        s = raw[src].replace(list(MISSING), "nan") if src in raw.columns else pd.Series(["nan"] * len(raw))
+        s = (
+            raw[src].replace(list(MISSING), "nan")
+            if src in raw.columns
+            else pd.Series(["nan"] * len(raw))
+        )
         out[dst] = pd.to_numeric(s, errors="coerce").fillna(0).astype("int64")
     out["protocol"] = raw["proto"].replace(list(MISSING), "") if "proto" in raw.columns else ""
     out["duration_us"] = (num("duration").fillna(0) * 1e6).round().astype("int64")
@@ -137,10 +145,20 @@ def read_zeek(path: str | Path) -> tuple[pd.DataFrame, dict]:
     dur_s = (out["duration_us"] / 1e6).clip(lower=0.001)
     out["bytes_per_s"] = ((out["fwd_bytes"] + out["bwd_bytes"]) / dur_s).round(3)
     out["packets_per_s"] = ((out["fwd_packets"] + out["bwd_packets"]) / dur_s).round(3)
-    out.insert(0, "flow_id", [f"zeek-{i}" for i in range(len(out))])
+    if "uid" in raw.columns:
+        out.insert(0, "flow_id", raw["uid"].replace(list(MISSING), "").astype(str))
+    else:
+        out.insert(0, "flow_id", [f"zeek-{i}" for i in range(len(out))])
+    if "service" in raw.columns:
+        out["service"] = raw["service"].replace(list(MISSING), "").astype(str)
+    if "conn_state" in raw.columns:
+        out["conn_state"] = raw["conn_state"].replace(list(MISSING), "").astype(str)
 
-    info = {"format": "zeek conn.log", "shape": f"{len(out)} 条连接",
-            "note": f"字段映射自 {len(fields)} 个 Zeek 字段（uid/conn_state/service 未使用）"}
+    info = {
+        "format": "zeek conn.log",
+        "shape": f"{len(out)} 条连接",
+        "note": f"字段映射自 {len(fields)} 个 Zeek 字段，保留 uid / conn_state / service",
+    }
     return out, info
 
 
@@ -153,7 +171,9 @@ def looks_like_zeek(path: Path) -> bool:
         return False
     try:
         with _open(path) as f:
-            for _ in range(5):
+            # Zeek 的标准头里 #fields 通常在第六行之后；多扫一些，
+            # 这样用户把 conn.log 改成 traffic.log 时也不会误判成 CSV。
+            for _ in range(200):
                 line = f.readline()
                 if line.startswith("#separator") or line.startswith("#fields"):
                     return True

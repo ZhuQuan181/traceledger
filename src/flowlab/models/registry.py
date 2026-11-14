@@ -1,4 +1,5 @@
 """模型注册表：插件化接入，新增模型只需加一个文件。"""
+
 from __future__ import annotations
 
 import importlib
@@ -17,6 +18,7 @@ def register(name: str):
         cls.name = name
         _REGISTRY[name] = cls
         return cls
+
     return deco
 
 

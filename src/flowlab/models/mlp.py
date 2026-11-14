@@ -1,7 +1,7 @@
 """最基础的监督模型：两层 MLP。"""
+
 from __future__ import annotations
 
-import numpy as np
 from sklearn.neural_network import MLPClassifier
 
 from flowlab.models.base import Detector
@@ -43,6 +43,3 @@ class MLPDetector(Detector):
         proba = self._clf.predict_proba(X)
         # 训练集只有一个类别时，predict_proba 只有一列
         return proba[:, 1] if proba.shape[1] > 1 else proba[:, 0] * 0
-
-    def score(self, X):
-        return self._clf.predict_proba(X)[:, 1]
