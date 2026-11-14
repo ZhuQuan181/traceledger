@@ -114,6 +114,16 @@ def _e(v) -> str:
     return html.escape("" if v is None else str(v))
 
 
+def _fmt(value, digits: int = 3, signed: bool = False) -> str:
+    if value is None:
+        return "—"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{number:+.{digits}f}" if signed else f"{number:.{digits}f}"
+
+
 def _signal(v: ReportView) -> str:
     if not v.curve:
         return ""
@@ -149,10 +159,11 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
         best_badge = "最高分 · 需换数据确认"
     else:
         best_badge = "最佳"
+    best_tag = f'<span class="best-tag">{_e(best_badge)}</span>'
     model_rows = "".join(
         f'<tr class="{"best" if m.is_best else ""}">'
         f'<th scope="row" class="mono">{_e(m.model)}'
-        f'{f"<span class=best-tag>{best_badge}</span>" if m.is_best else ""}</th>'
+        f'{best_tag if m.is_best else ""}</th>'
         f'<td class="muted">{_e(m.kind_cn)}</td><td class="num">{_e(m.auc)}</td>'
         f'<td class="num">{_e(m.f1)}</td><td class="num">{_e(m.precision)}</td>'
         f'<td class="num">{_e(m.recall)}</td><td class="num">{_e(m.fpr)}</td>'
@@ -174,7 +185,7 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
         f'<tr><td class="mono">{_e(f.get("src_ip"))}</td><td class="mono">{_e(f.get("dst_ip"))}</td>'
         f'<td class="num">{_e(f.get("dst_port"))}</td><td class="muted">{_e(f.get("protocol"))}</td>'
         f'<td class="mono muted">{_e(f.get("timestamp"))}</td>'
-        f'<td class="num">{_e(f"{f.get('score', 0):.3f}")}</td>'
+        f'<td class="num">{_e(_fmt(f.get("score", 0)))}</td>'
         f'<td class="{"bad" if str(f.get("label", "")).lower() not in {"", "benign"} else "ok"}">'
         f'{_e(f.get("label"))}</td></tr>'
         for f in v.flows
@@ -184,10 +195,10 @@ def render_html(results: list[EvalResult], warns: list[dict], meta: dict,
     if v.ablation:
         rows = "".join(
             f'<tr><td class="mono">{_e(x["model"])}</td>'
-            f'<td class="num">{_e("—" if x.get("auc_with") is None else f"{x['auc_with']:.4f}")}</td>'
-            f'<td class="num">{_e("—" if x.get("auc_without") is None else f"{x['auc_without']:.4f}")}</td>'
+            f'<td class="num">{_e(_fmt(x.get("auc_with"), 4))}</td>'
+            f'<td class="num">{_e(_fmt(x.get("auc_without"), 4))}</td>'
             f'<td class="num {"bad" if (x.get("delta") or 0) > 0.02 else ""}">'
-            f'{_e("—" if x.get("delta") is None else f"{x['delta']:+.4f}")}</td></tr>'
+            f'{_e(_fmt(x.get("delta"), 4, signed=True))}</td></tr>'
             for x in v.ablation.get("rows", [])
         )
         ab_html = (
