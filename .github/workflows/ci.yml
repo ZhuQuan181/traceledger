@@ -85,6 +85,33 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
+  source-package:
+    name: Package · source checkout
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: latest
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Build without a frontend bundle
+        run: |
+          test ! -d web/dist
+          uv build
+
+      - name: Install wheel and sdist without web assets
+        run: |
+          uv venv /tmp/flowlab-wheel-no-ui
+          uv pip install --python /tmp/flowlab-wheel-no-ui/bin/python dist/*.whl
+          /tmp/flowlab-wheel-no-ui/bin/flowlab --version
+          uv venv /tmp/flowlab-sdist
+          uv pip install --python /tmp/flowlab-sdist/bin/python dist/*.tar.gz
+          /tmp/flowlab-sdist/bin/flowlab --version
+
   wheel:
     name: Package · wheel smoke test
     runs-on: ubuntu-latest
@@ -113,6 +140,7 @@ jobs:
           uv build
           uv run python - <<'PY'
           import glob
+          import tarfile
           import zipfile
 
           wheel = glob.glob("dist/*.whl")[0]
@@ -120,6 +148,11 @@ jobs:
               names = set(archive.namelist())
           assert "flowlab/web/index.html" in names, "wheel 缺少 Web UI"
           assert any(name.endswith(".js") for name in names if name.startswith("flowlab/web/assets/"))
+          sdist = glob.glob("dist/*.tar.gz")[0]
+          with tarfile.open(sdist) as archive:
+              sd_names = set(archive.getnames())
+          assert any(name.endswith("/hatch_build.py") for name in sd_names)
+          assert any("/web/dist/index.html" in name for name in sd_names)
           print(wheel, "contains packaged Web UI")
           PY
 

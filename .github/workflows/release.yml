@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build frontend
+        working-directory: web
+        run: npm ci && npm test && npm run build
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: latest
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Verify release source
+        run: |
+          uv sync --locked --extra dev --extra api --extra data
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run pytest tests/
+
+      - name: Build artifacts
+        run: |
+          uv build
+          uv export --locked --no-dev --no-hashes --no-emit-project --format requirements-txt \
+            > dist/requirements.lock.txt
+          (cd dist && sha256sum ./*.whl ./*.tar.gz requirements.lock.txt > SHA256SUMS)
+          ls -lh dist
+
+      - name: Smoke-test installed wheel
+        run: |
+          uv venv /tmp/flowlab-release
+          uv pip install --python /tmp/flowlab-release/bin/python dist/flowlab-*.whl
+          /tmp/flowlab-release/bin/flowlab --version
+          /tmp/flowlab-release/bin/flowlab demo --normal 120 --attack 20 --models mlp --no-save
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/*.whl dist/*.tar.gz dist/requirements.lock.txt dist/SHA256SUMS \
+            --verify-tag \
+            --generate-notes \
+            --title "FlowLab $GITHUB_REF_NAME"
