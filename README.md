@@ -1,33 +1,38 @@
-# FlowLab · 流量异常检测工作台
+# FlowLab · 流量异常检测研究台
 
 [![CI](https://github.com/ZhuQuan181/traceledger/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/ZhuQuan181/traceledger/actions/workflows/ci.yml)
 [![Pages](https://github.com/ZhuQuan181/traceledger/actions/workflows/pages.yml/badge.svg?branch=master)](https://zhuquan181.github.io/traceledger/)
+[![Release](https://img.shields.io/github/v/release/ZhuQuan181/traceledger?display_name=tag&color=0d5d61)](https://github.com/ZhuQuan181/traceledger/releases/latest)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-0d5d61?logo=python&logoColor=white)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/React-18-0d5d61?logo=react&logoColor=white)](https://react.dev/)
+[![Docker](https://img.shields.io/badge/Docker-compose-0d5d61?logo=docker&logoColor=white)](compose.yaml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-0d5d61)](LICENSE)
 
-> 工作名（占位，可改）。一句话：**把网络流量异常检测的研究模型，变成能跑、能复现、能解释的系统。**
+> **把网络流量异常检测的研究模型，变成能跑、能复现、能解释的系统。**
 
 - 创建：2026-11-11
-- 状态：**v0.5**（2026-11-14：前端视觉与交互重构；102 tests，pcap 测试需 tshark）
+- 当前版本：**v0.6.0**（2026-11-15：可复现性加固、PR-AUC、调查线索、移动端导航、Docker）
+- 测试：**125 个后端测试 + 11 个前端测试**；pcap 测试需要本机 `tshark`
 - 文档语言：中文为主，提供英文 README；代码与接口用英文
 - 在线项目页：https://zhuquan181.github.io/traceledger/
 - 示例报告：https://zhuquan181.github.io/traceledger/demo-report.html
 - 其他语言：[English](README.en.md)
 
-[![FlowLab 工作台截图](screens/v09-workspace.png)](https://zhuquan181.github.io/traceledger/)
+[![FlowLab 工作台截图](screens/v10-workspace.png)](https://zhuquan181.github.io/traceledger/)
 
 ## 快速开始
 
+环境要求：Python 3.11+、[uv](https://docs.astral.sh/uv/)；修改前端需要 Node.js 22.12+；
+读取 pcap 需要 `tshark`。
+
 ```bash
-# 0) 没有 uv 先装：https://docs.astral.sh/uv/getting-started/installation/
 git clone https://github.com/ZhuQuan181/traceledger.git
 cd traceledger
 uv sync --extra dev --extra api --extra data
 
 uv run flowlab sample --rows 2000          # 生成一份样例 CSV（可直接给同事）
 uv run flowlab demo                        # 合成数据跑一次
-uv run flowlab demo --report out/report.md # 同时生成报告
+uv run flowlab demo --report out/report.md --html out/report.html
 uv run flowlab run my.csv --split temporal # 跑自己的 CSV（需要 label 列）
 uv run flowlab run cap.pcap                # pcap + 同名 cap.pcap.labels.csv 自动对齐
 uv run flowlab run cap.pcap --labels l.csv # 或显式指定标签文件
@@ -43,6 +48,15 @@ cd web && npm ci && npm run build          # 改前端后重新构建
 
 pcap 需要本机 `tshark`（Ubuntu: `sudo apt install tshark`）。
 Zeek `conn.log` 可直接读（`.log` / `.log.gz`），标签用 `--labels` 旁挂。
+
+### Docker
+
+```bash
+docker compose up --build                 # http://127.0.0.1:8765
+docker compose down                       # 实验历史保留在 flowlab-data 卷中
+```
+
+Docker 镜像同时包含 Python API 和构建后的 Web UI；容器默认只映射到本机回环地址。
 
 ## 命令
 
@@ -61,15 +75,28 @@ Zeek `conn.log` 可直接读（`.log` / `.log.gz`），标签用 `--labels` 旁�
 | `flowlab show ID` | 回看某次实验，可导出 MD / HTML |
 | `flowlab compare ID1 ID2` | 跨实验对比最佳指标 |
 
-通用参数：`--models mlp,iforest`、`--split temporal|random`、`--seed`、`--threshold`、
+通用参数：`--models mlp,iforest`、`--split temporal|random`、`--test-size`、`--seed`、`--threshold`、
 `--ablate COLUMN`（去掉某列重跑，量化它撑了多少指标）、`--html PATH`（单文件报告）、
 `--report PATH`（Markdown）、`--json`、`--no-save`。
 
 ## 项目页与 CI
 
-- **CI**：Python 3.11 / 3.13 跑完整测试，前端跑 `npm ci && npm run build`
-- **Pages**：部署 `site/` 项目页和一份真实生成的静态报告
+- **质量门禁**：Ruff 检查与格式校验；Python 3.11 / 3.13 跑完整后端测试
+- **前端**：组件测试、全量依赖审计、生产构建
+- **打包**：构建 wheel，验证内置 Web UI，在独立虚拟环境安装后跑一次真实 CLI
+- **容器**：每次 CI 都执行 Docker build
+- **Pages**：部署中英文项目页和一份真实生成的静态报告
 - **本地工作台**：Pages 只承载介绍页；完整 Web 工作台需要本机 Python 后端（`flowlab serve`）
+
+## v0.6 的重点
+
+- **数据正确性**：接受常见标签列名；清洗 `inf/-inf`；标签缺失时显式失败，绝不把未标注流当成攻击。
+- **可复现性**：记录数据指纹、实验指纹、种子、切分、特征与来源；时间切分退化时会明确标注。
+- **调查能力**：新增 PR-AUC、按攻击类型的召回/误报率、典型 FP/FN、按源 IP 的告警排序。
+- **界面**：桌面三栏工作台；移动端提供配置、历史、报告三个抽屉；历史记录可恢复完整参数。
+- **交付**：wheel/sdist 内含前端；提供 Dockerfile 与 Compose；npm 全量审计为 0 漏洞。
+
+更完整的后续优先级和验收标准见 [优化路线图](docs/OPTIMIZATION-ROADMAP.md)。
 
 ## 架构
 
@@ -78,8 +105,8 @@ CSV / pcap
    ↓ ingest        列名标准化、分隔符/编码嗅探、五元组聚合
    ↓ features      泄漏检测 → 训练/测试分离的预处理
    ↓ models        registry 插件（mlp / iforest / autoencoder / 你的）
-   ↓ eval          时间/随机切分 → AUC·F1·FPR·混淆矩阵
-   ↓ report/api    报告含：指纹、种子、特征清单、类别分布、混淆矩阵
+   ↓ eval          时间/随机切分 → AUC·PR-AUC·F1·FPR·类别召回·调查线索
+   ↓ report/api    报告含：指纹、种子、特征清单、类别分布、混淆矩阵、复现命令
   ↓ store         SQLite 实验历史（本地，不上传）
 ```
 
@@ -95,11 +122,13 @@ CSV / pcap
 from flowlab.models.base import Detector
 from flowlab.models.registry import register
 
+
 @register("your_model")
 class YourDetector(Detector):
     kind = "supervised"
+
     def fit(self, X, y): ...
-    def score(self, X): ...   # 返回 [0,1]，越大越可疑
+    def score(self, X): ...  # 返回 [0,1]，越大越可疑
 ```
 
 ## 这个项目要解决什么
@@ -122,6 +151,10 @@ class YourDetector(Detector):
 | `07-技术架构与数据流.md` | 系统怎么搭（补"没做过系统"的短板） | 工程文档 |
 | `08-指标与成功标准.md` | 怎么算成功、怎么埋点 | derisk-measurement-advisor |
 | `09-开放问题.md` | 还没定的决策，逐条待决 | — |
+| `docs/OPTIMIZATION-ROADMAP.md` | 后续优化优先级、验收标准与非目标 | — |
+| `CHANGELOG.md` | 版本变更记录 | — |
+| `CONTRIBUTING.md` | 本地开发、测试与提交约定 | — |
+| `SECURITY.md` | 威胁边界与漏洞报告方式 | — |
 
 ## 已确认的事实（不是假设）
 
@@ -136,7 +169,7 @@ class YourDetector(Detector):
 | 首要用户 | **安全方向研究者**（Persona A）；教师/中小企业为次要 |
 | 许可证 | **Apache-2.0** |
 | SPIN-OW 权重 | **不内置**，只提供接入模板 |
-| 输入格式 | **CSV + pcap 都要**（pcap 用 tshark/nDPI 离线解析） |
+| 输入格式 | **CSV + pcap 都要**（pcap 当前用 tshark 离线解析；nDPI 为后续可选） |
 | 项目执行 | 按里程碑推进，用户在关键节点做决策与验收 |
 
 ## 三条原则

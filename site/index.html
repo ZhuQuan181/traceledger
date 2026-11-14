@@ -11,6 +11,9 @@
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://zhuquan181.github.io/traceledger/">
   <meta property="og:image" content="https://zhuquan181.github.io/traceledger/assets/workspace.png">
+  <meta property="og:image:alt" content="FlowLab 工作台：配置、结论、指标和调查线索">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://zhuquan181.github.io/traceledger/">
   <link rel="alternate" hreflang="en" href="./en/">
   <link rel="alternate" hreflang="zh-CN" href="./">
   <link rel="alternate" hreflang="x-default" href="./">
@@ -59,7 +62,7 @@
           <div><dt>输入</dt><dd>14 种格式</dd></div>
           <div><dt>审计</dt><dd>4 类泄漏</dd></div>
           <div><dt>模型</dt><dd>3 个基线</dd></div>
-          <div><dt>测试</dt><dd>102 项</dd></div>
+          <div><dt>测试</dt><dd>125 + 11</dd></div>
         </dl>
       </div>
 
@@ -70,7 +73,7 @@
         </div>
         <img src="./assets/workspace.png" width="1440" height="900"
              alt="FlowLab 工作台截图：左侧配置实验，中间展示结论、指标与消融，右侧给出泄漏和下一步建议。">
-        <figcaption>v0.9 工作台：配置、证据和下一步在同一屏内。</figcaption>
+        <figcaption>v0.6 工作台：配置、证据和下一步在同一屏内。</figcaption>
       </figure>
     </section>
 
@@ -87,7 +90,7 @@
         <ul class="invariants">
           <li><strong>标签不进特征</strong><span>训练前统一丢弃标签与标识列。</span></li>
           <li><strong>预处理只在训练集拟合</strong><span>测试集统计量不会倒灌。</span></li>
-          <li><strong>同数据同种子逐位一致</strong><span>结果、指纹和报告都能复现。</span></li>
+          <li><strong>同数据同种子可复现</strong><span>指标与实验指纹稳定；报告含生成时间。</span></li>
         </ul>
       </div>
     </section>
@@ -106,11 +109,11 @@
         <dl class="ledger">
           <div>
             <dt>配置</dt>
-            <dd>数据来源、时间/随机切分、模型、阈值、消融列。上传数据后，消融列从实际特征中读取。</dd>
+            <dd>数据来源、时间/随机切分、测试集比例、种子、模型、阈值和消融列。上传数据后，消融列从实际特征中读取。</dd>
           </div>
           <div>
             <dt>证据</dt>
-            <dd>AUC、F1、误报率、混淆矩阵、分数曲线、类别分布和参与训练的特征清单。</dd>
+            <dd>AUC、PR-AUC、F1、误报率、混淆矩阵、分数曲线、类别分布和参与训练的特征清单。</dd>
           </div>
           <div>
             <dt>判断</dt>
@@ -118,7 +121,7 @@
           </div>
           <div>
             <dt>下一步</dt>
-            <dd>按泄漏列重跑、做消融、查看最可疑的流，或直接导出 HTML / Markdown。</dd>
+            <dd>按泄漏列重跑、做消融、查看最可疑的流、按攻击类型和源 IP 调查，或导出 HTML / Markdown。</dd>
           </div>
         </dl>
       </div>
@@ -158,21 +161,22 @@
         <h2 id="report-title">报告不是截图的堆叠。</h2>
         <p>
           同一份 payload 驱动网页、Markdown 和自包含 HTML。
-          拿到报告的人可以看到结论为什么成立，也可以按指纹和命令重新跑一次。
+          拿到报告的人可以看到结论为什么成立，也可以按指纹和命令重新跑一次；
+          报告同时包含 PR-AUC、分类召回和典型误报/漏报。
         </p>
         <a class="report-link" href="./demo-report.html">打开实际生成的示例报告</a>
       </div>
       <div class="report-sample" aria-label="示例报告中的泄漏检查片段">
         <div class="sample-bar"><span>demo-report.html</span><span>standalone</span></div>
         <pre><code><span class="code-muted"># 结论</span>
-<span class="code-warn">先修泄漏，再看指标</span>
+<span class="code-warn">先做消融，再决定指标能不能用</span>
 
 <span class="code-muted"># 检查</span>
-port_leak  类别 DDoS 中 95.2% 走 3333
-verdict    指标不能作为结论
+port_leak  类别 DDoS 中 95.8% 走 3333
+verdict    端口集中，建议先做消融
 
 <span class="code-muted"># 复现</span>
-flowlab demo --report out/report.md</code></pre>
+uv run flowlab demo --leaky --html out/report.html</code></pre>
       </div>
     </section>
 
@@ -206,6 +210,7 @@ flowlab demo --report out/report.md</code></pre>
     <div class="footer-meta">
       <span>Apache-2.0</span>
       <a href="https://github.com/ZhuQuan181/traceledger/blob/master/docs/ARCHITECTURE.md">架构</a>
+      <a href="https://github.com/ZhuQuan181/traceledger/blob/master/docs/OPTIMIZATION-ROADMAP.md">路线图</a>
       <a href="https://github.com/ZhuQuan181/traceledger">GitHub</a>
       <a href="./en/" hreflang="en" lang="en">English</a>
     </div>

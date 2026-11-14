@@ -2,33 +2,38 @@
 
 [![CI](https://github.com/ZhuQuan181/traceledger/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/ZhuQuan181/traceledger/actions/workflows/ci.yml)
 [![Pages](https://github.com/ZhuQuan181/traceledger/actions/workflows/pages.yml/badge.svg?branch=master)](https://zhuquan181.github.io/traceledger/en/)
+[![Release](https://img.shields.io/github/v/release/ZhuQuan181/traceledger?display_name=tag&color=0d5d61)](https://github.com/ZhuQuan181/traceledger/releases/latest)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-0d5d61?logo=python&logoColor=white)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/React-18-0d5d61?logo=react&logoColor=white)](https://react.dev/)
+[![Docker](https://img.shields.io/badge/Docker-compose-0d5d61?logo=docker&logoColor=white)](compose.yaml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-0d5d61)](LICENSE)
 
 **Language:** [中文](README.md) | **English**
 
-> Working name (placeholder). One line: **turn network traffic anomaly detection research models into systems that run, reproduce, and explain.**
+> **Turn network traffic anomaly detection research models into systems that run, reproduce, and explain.**
 
 - Created: 2026-11-11
-- Status: **v0.5** (2026-11-14: UI/UX redesign; 102 tests, pcap tests require tshark)
+- Current version: **v0.6.0** (2026-11-15: reproducibility hardening, PR-AUC, investigation views, mobile navigation, Docker)
+- Tests: **125 backend tests + 11 frontend tests**; pcap tests require `tshark`
 - Documentation: Chinese and English READMEs, with design docs in Chinese; code and interfaces are in English
 - Project site: https://zhuquan181.github.io/traceledger/en/
 - Sample report: https://zhuquan181.github.io/traceledger/demo-report.html
 
-[![FlowLab workspace](screens/v09-workspace.png)](https://zhuquan181.github.io/traceledger/en/)
+[![FlowLab workspace](screens/v10-workspace.png)](https://zhuquan181.github.io/traceledger/en/)
 
 ## Quick start
 
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/); Node.js 22.12+ when changing the frontend;
+`tshark` for pcap ingestion.
+
 ```bash
-# 0) Install uv if needed: https://docs.astral.sh/uv/getting-started/installation/
 git clone https://github.com/ZhuQuan181/traceledger.git
 cd traceledger
 uv sync --extra dev --extra api --extra data
 
 uv run flowlab sample --rows 2000          # Generate a sample CSV
 uv run flowlab demo                        # Run the full pipeline on synthetic data
-uv run flowlab demo --report out/report.md # Also write a Markdown report
+uv run flowlab demo --report out/report.md --html out/report.html
 uv run flowlab run my.csv --split temporal # Run your own CSV (requires a label column)
 uv run flowlab run cap.pcap                # Auto-align cap.pcap.labels.csv
 uv run flowlab run cap.pcap --labels l.csv # Or pass a label file explicitly
@@ -44,6 +49,16 @@ cd web && npm ci && npm run build          # Rebuild the frontend
 
 `pcap` ingestion requires `tshark` (Ubuntu: `sudo apt install tshark`).
 Zeek `conn.log` files can be read directly (`.log` / `.log.gz`); pass sidecar labels with `--labels`.
+
+### Docker
+
+```bash
+docker compose up --build                 # http://127.0.0.1:8765
+docker compose down                       # history stays in the flowlab-data volume
+```
+
+The image contains both the Python API and the built Web UI. The Compose service publishes to the
+loopback interface only.
 
 ## Commands
 
@@ -62,15 +77,28 @@ Zeek `conn.log` files can be read directly (`.log` / `.log.gz`); pass sidecar la
 | `flowlab show ID` | Inspect a run and export Markdown / HTML |
 | `flowlab compare ID1 ID2` | Compare best metrics across runs |
 
-Shared flags: `--models mlp,iforest`, `--split temporal|random`, `--seed`, `--threshold`,
+Shared flags: `--models mlp,iforest`, `--split temporal|random`, `--test-size`, `--seed`, `--threshold`,
 `--ablate COLUMN` (drop one column and rerun to quantify its contribution),
 `--html PATH` (standalone HTML), `--report PATH` (Markdown), `--json`, `--no-save`.
 
 ## Project site and CI
 
-- **CI**: runs the full suite on Python 3.11 and 3.13, then builds the frontend with `npm ci && npm run build`
-- **Pages**: deploys the static project site in `site/` plus a real generated report
+- **Quality**: Ruff checks and format validation; the full backend suite on Python 3.11 and 3.13
+- **Frontend**: component tests, a full dependency audit, and a production build
+- **Packaging**: builds a wheel, verifies the embedded Web UI, installs it in a clean environment, and runs a real CLI smoke test
+- **Container**: builds the Docker image on every CI run
+- **Pages**: deploys the Chinese and English project sites plus a real generated report
 - **Local workbench**: GitHub Pages hosts the introduction only; the full Web UI needs the local Python backend (`flowlab serve`)
+
+## Highlights in v0.6
+
+- **Data correctness**: accepts common label-column names, cleans `inf/-inf`, and fails explicitly on missing labels instead of treating unlabeled flows as attacks.
+- **Reproducibility**: records dataset and experiment fingerprints, seed, split, features, and source; temporal fallback is called out explicitly.
+- **Investigation**: PR-AUC, recall/false-alarm rate by attack type, representative FP/FN examples, and source-IP alert ranking.
+- **Interface**: three-column desktop workbench; mobile drawers for setup, history, and reports; history restores the full experiment configuration.
+- **Delivery**: wheel/sdist include the frontend; Dockerfile and Compose are included; the full npm audit reports zero vulnerabilities.
+
+See the [optimization roadmap](docs/OPTIMIZATION-ROADMAP.md) for the next priorities and acceptance criteria.
 
 ## Architecture
 
@@ -79,8 +107,8 @@ CSV / pcap
    ↓ ingest        normalize columns, sniff delimiters/encoding, aggregate five-tuples
    ↓ features      leakage checks → preprocessors fitted on the training split only
    ↓ models        plugin registry (mlp / iforest / autoencoder / your model)
-   ↓ eval          temporal/random split → AUC · F1 · FPR · confusion matrix
-   ↓ report/api    fingerprint, seed, feature list, class distribution, confusion matrix
+   ↓ eval          temporal/random split → AUC · PR-AUC · F1 · FPR · class recall · investigation
+   ↓ report/api    fingerprint, seed, feature list, class distribution, confusion matrix, rerun command
   ↓ store          local SQLite experiment history (never uploaded)
 ```
 
@@ -96,11 +124,13 @@ Adding a model takes one file. Any module placed under `src/flowlab/models/` is 
 from flowlab.models.base import Detector
 from flowlab.models.registry import register
 
+
 @register("your_model")
 class YourDetector(Detector):
     kind = "supervised"
+
     def fit(self, X, y): ...
-    def score(self, X): ...   # return [0, 1]; higher means more suspicious
+    def score(self, X): ...  # return [0, 1]; higher means more suspicious
 ```
 
 ## What this project solves
@@ -128,6 +158,10 @@ The design documents are currently written in Chinese.
 | `07-技术架构与数据流.md` | Technical architecture and data flow |
 | `08-指标与成功标准.md` | Success metrics and instrumentation plan |
 | `09-开放问题.md` | Open decisions |
+| `docs/OPTIMIZATION-ROADMAP.md` | Prioritized next steps and acceptance criteria |
+| `CHANGELOG.md` | Version history |
+| `CONTRIBUTING.md` | Local development, testing, and contribution rules |
+| `SECURITY.md` | Trust boundaries and vulnerability reporting |
 
 ## Established facts
 
@@ -142,7 +176,7 @@ The design documents are currently written in Chinese.
 | Primary user | **Security researchers** (Persona A); teachers and small teams are secondary |
 | License | **Apache-2.0** |
 | SPIN-OW weights | **Not bundled**; an integration template is provided |
-| Input formats | **CSV and pcap** (pcap parsed offline with tshark/nDPI) |
+| Input formats | **CSV and pcap** (pcap currently parsed offline with tshark; nDPI is a possible extension) |
 | Project execution | Milestone-driven; decisions and acceptance happen at key checkpoints |
 
 ## Three principles

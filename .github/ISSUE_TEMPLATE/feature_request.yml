@@ -1,0 +1,32 @@
+name: Feature request
+description: Propose a focused improvement to FlowLab
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user workflow is blocked or unnecessarily slow?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe inputs, outputs, and how the result would be verified.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This is not a request to turn FlowLab into a line-rate inline IDS.
+          required: true
+        - label: This can be tested with synthetic data rather than private traffic.
+          required: true

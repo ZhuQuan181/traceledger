@@ -68,31 +68,41 @@
 ```python
 @dataclass
 class LoadedFrame:
-    df: pd.DataFrame        # 列名已标准化，已加派生特征
-    source: str             # "flows.csv（csv）"
-    label_info: dict        # {"mode": "embedded|flow_id|五元组|row_order", "labelled": n}
-    engineering: dict       # {"min_duration_ms": 1.0, "derived": [...]}
-    format_info: dict       # {"format": "npz", "shape": "...", "pickle_object": "..."}
+    df: pd.DataFrame  # 列名已标准化，已加派生特征
+    source: str  # "flows.csv（csv）"
+    label_info: dict  # {"mode": "embedded|flow_id|五元组|row_order", "labelled": n}
+    engineering: dict  # {"min_duration_ms": 1.0, "derived": [...]}
+    format_info: dict  # {"format": "npz", "shape": "...", "pickle_object": "..."}
 ```
 
 ### 2. `EvalResult`（runner 的输出）
 
 字段固定：`model / kind / metrics / confusion / duration_s / params / split /
-dataset_hash / n_train / n_test / threshold / seed / attack_train / top_flows / score_curve`。
+split_requested / dataset_hash / n_train / n_test / threshold / seed / attack_train /
+features / encoded_features / top_flows / score_curve / by_label / false_positives /
+false_negatives / source_ranking`。
 
 `score_curve` 是 `[{p: 窗口最高分, h: 超阈值比例}]`，前端与 HTML 报告共用这一份数据。
+`by_label`、典型错误样本和 `source_ranking` 只在开启解释时生成，用于调查视图。
 
 ### 3. `payload`（对外的 JSON）
 
 ```json
 {
-  "dataset": {"source","rows","train","test","hash","split","threshold","seed",
-               "attack_train","attack_test","labels","engineering","format"},
+  "dataset": {"source","rows","train","test","hash","split","split_requested",
+               "threshold","seed","attack_train","attack_test","labels","engineering",
+               "format","classes","features","experiment_fingerprint"},
+  "experiment": {"models","split","split_effective","test_size","seed","threshold",
+                 "source_kind","source","command"},
+  "generated_at": "...", "experiment_fingerprint": "...",
   "warnings": [{"rule","columns","severity","message","suggestion"}],
   "results": [EvalResult...],
   "best_model": "mlp",
   "top_flows": [...],
   "score_curve": [...],
+  "verdict": {"level","headline","reasons","checks"},
+  "checklist": [{"item","ok","detail"}],
+  "investigation": {"by_label","false_positives","false_negatives","source_ranking"},
   "ablation": {"column","rows","note"} | null,
   "report_md": "...", "report_html": "...", "run_id": "abc123"
 }
@@ -111,16 +121,18 @@ dataset_hash / n_train / n_test / threshold / seed / attack_train / top_flows / 
 | 加一条泄漏规则 | `features/leakage.py` 的 `detect()` 里 append 一条 | 不用 |
 | 改指标口径 | `eval/metrics.py` | 报告会自动跟着变 |
 | 加报告章节 | `report/markdown.py` + `report/html.py` + `App.tsx` | 三处都要改，这是已知成本 |
-| 加实验参数 | `ExperimentSpec` → `cli._add_run_flags` → `api` 表单 → `Rail.tsx` | 四层都要改，参数少时优先复用现有字段 |
+| 加实验参数 | `ExperimentSpec` → `cli._add_run_flags` → `api` 表单 → `ConfigRail.tsx` | 四层都要改，参数少时优先复用现有字段 |
 
 ## 五、必须守住的不变量（都有测试）
 
 1. **标签永不进特征**：`test_label_never_used_as_feature`
 2. **预处理器只在训练集 fit**：`test_pair_uses_train_statistics`
 3. **速率有兜底**：`test_single_packet_rate_is_bounded`
-4. **同数据同种子结果逐位一致**：`test_reproducible_same_seed`
+4. **同数据同种子指标与指纹稳定**：`test_reproducible_same_seed`；
+   报告含生成时间，不承诺整个文件逐字节一致
 5. **数据指纹随内容变化**：`test_hash_changes_with_data`
-6. **切分后类别缺失要告警**：`test_*coverage*` / runner 抛错
+6. **切分后类别缺失要告警**：`test_benign_aliases_are_recognized_in_coverage_warnings`；
+   测试集缺任一类别时 runner 直接抛错
 7. **未知格式要给人话错误**：`ShapeError` 带 keys/shape 描述
 8. **只对真正进特征的泄漏报警**：`test_id_leak_on_dropped_column_does_not_block`
 9. **消融能推翻泄漏判断**：`test_ablation_can_clear_port_leak`（Δ<0.05 时不该判死）
@@ -130,6 +142,10 @@ dataset_hash / n_train / n_test / threshold / seed / attack_train / top_flows / 
     （`test_cross_site_write_is_rejected`）
 12. **HTTP pickle 需要同源会话令牌**：防止恶意网页借 localhost 触发反序列化
     （`test_pickle_upload_requires_session_token`）
+13. **未标注流不得默认当成攻击**：缺失标签会在训练前失败
+    （`test_missing_labels_are_rejected_instead_of_treated_as_attacks`）
+14. **消融列必须真实参与训练**：元数据列和不存在列返回可读错误
+    （`test_ablation_must_target_a_feature_used_by_the_model`）
 
 ## 六、这次重构做了什么（v0.4）
 
@@ -150,8 +166,22 @@ dataset_hash / n_train / n_test / threshold / seed / attack_train / top_flows / 
 2. ✅ 报告：新增 `report/view.py::ReportView`，Markdown 与 HTML 只做排版，不再各算一遍。
 3. ✅ 历史库：`store.prune(keep)`，CLI `history --prune N`，API `DELETE /api/history?keep=N`。
 
-## 八、剩余债务
+## 八、v0.6 加固
+
+1. ✅ 标签缺失、未知模型、阈值、种子和测试集比例在训练前校验。
+2. ✅ 时间切分退化会进入警告、结论、清单和报告，不再只存在于日志。
+3. ✅ 报告记录真实来源、复现命令、数据/实验指纹和切分方式。
+4. ✅ 新增 PR-AUC、类别召回/误报率、典型 FP/FN 和源 IP 告警排序。
+5. ✅ 移动端提供配置/历史/报告抽屉，历史可恢复完整配置；上传文件明确要求重选文件。
+6. ✅ wheel 内置 Web UI，Docker 与独立 wheel 安装均有 CI 冒烟测试。
+7. ✅ 测试集必须同时包含正常与攻击样本；Docker 严格按 `uv.lock` 安装并检查运行时健康接口。
+
+## 九、剩余债务
 
 1. `store.py` 存整份 payload，历史库会随报告变长而变大；可只存结果 + 报告按需重建。
 2. 泄漏规则是硬编码顺序，规则多起来应改成注册表 + 可开关。
-3. 前端 `styles.css` 仍是单文件（21 KB），组件多起来需要按层拆成 `tokens/layout/components`。
+3. 前端 `styles.css` 仍是单文件（约 38 KB），组件多起来需要按层拆成 `tokens/layout/components`。
+4. 长任务没有进度事件和取消机制；历史库缺 schema 迁移、检索和标签。
+5. 远程模式没有鉴权；默认只能作为本机单用户工具使用。
+
+下一步的优先级和验收标准见 [`OPTIMIZATION-ROADMAP.md`](OPTIMIZATION-ROADMAP.md)。

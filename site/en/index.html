@@ -11,6 +11,9 @@
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://zhuquan181.github.io/traceledger/en/">
   <meta property="og:image" content="https://zhuquan181.github.io/traceledger/assets/workspace.png">
+  <meta property="og:image:alt" content="FlowLab workbench: setup, verdict, metrics, and investigation evidence">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://zhuquan181.github.io/traceledger/en/">
   <link rel="alternate" hreflang="en" href="./">
   <link rel="alternate" hreflang="zh-CN" href="../">
   <link rel="alternate" hreflang="x-default" href="../">
@@ -60,7 +63,7 @@
           <div><dt>Input</dt><dd>14 formats</dd></div>
           <div><dt>Audit</dt><dd>4 leak types</dd></div>
           <div><dt>Models</dt><dd>3 baselines</dd></div>
-          <div><dt>Tests</dt><dd>102</dd></div>
+          <div><dt>Tests</dt><dd>125 + 11</dd></div>
         </dl>
       </div>
 
@@ -71,7 +74,7 @@
         </div>
         <img src="../assets/workspace.png" width="1440" height="900"
              alt="FlowLab workbench screenshot: experiment configuration on the left, verdict and metrics in the center, leakage and next steps on the right.">
-        <figcaption>v0.9 workbench: configuration, evidence, and next steps in one view.</figcaption>
+        <figcaption>v0.6 workbench: configuration, evidence, and next steps in one view.</figcaption>
       </figure>
     </section>
 
@@ -89,7 +92,7 @@
         <ul class="invariants">
           <li><strong>Labels never enter features</strong><span>Label and identifier columns are dropped before training.</span></li>
           <li><strong>Preprocessing is fitted on training data only</strong><span>Test-set statistics never leak backward.</span></li>
-          <li><strong>Same data and seed produce identical output</strong><span>Results, fingerprints, and reports reproduce.</span></li>
+          <li><strong>Same data and seed reproduce the experiment</strong><span>Metrics and the experiment fingerprint stay stable; reports include a generation time.</span></li>
         </ul>
       </div>
     </section>
@@ -108,11 +111,11 @@
         <dl class="ledger">
           <div>
             <dt>Setup</dt>
-            <dd>Data source, temporal or random split, models, threshold, and ablation column. After an upload, the ablation list is populated from the features actually used.</dd>
+            <dd>Data source, temporal or random split, test size, seed, models, threshold, and ablation column. After an upload, the ablation list is populated from the features actually used.</dd>
           </div>
           <div>
             <dt>Evidence</dt>
-            <dd>AUC, F1, false-positive rate, confusion matrix, score curve, class distribution, and the exact feature list used in training.</dd>
+            <dd>AUC, PR-AUC, F1, false-positive rate, confusion matrix, score curve, class distribution, and the exact feature list used in training.</dd>
           </div>
           <div>
             <dt>Verdict</dt>
@@ -120,7 +123,7 @@
           </div>
           <div>
             <dt>Next step</dt>
-            <dd>Rerun without a leaking column, test an ablation, inspect the most suspicious flows, or export HTML / Markdown.</dd>
+            <dd>Rerun without a leaking column, test an ablation, inspect the most suspicious flows, investigate by attack type and source IP, or export HTML / Markdown.</dd>
           </div>
         </dl>
       </div>
@@ -161,22 +164,23 @@
         <p>
           One payload drives the Web UI, Markdown, and standalone HTML.
           Whoever receives the report can see why the verdict holds and rerun
-          the experiment from the fingerprint and command. The sample report is
-          currently generated in Chinese.
+          the experiment from the fingerprint and command. It also includes
+          PR-AUC, per-class recall, and representative false positives and misses.
+          The sample report is currently generated in Chinese.
         </p>
         <a class="report-link" href="../demo-report.html">Open the generated sample report</a>
       </div>
       <div class="report-sample" aria-label="Leakage-check excerpt from the sample report">
         <div class="sample-bar"><span>demo-report.html</span><span>standalone</span></div>
         <pre><code><span class="code-muted"># verdict</span>
-<span class="code-warn">Fix leakage before trusting metrics</span>
+<span class="code-warn">Run ablation before trusting the metrics</span>
 
 <span class="code-muted"># checks</span>
-port_leak  95.2% of DDoS flows use 3333
-verdict    metrics are not usable as evidence
+port_leak  95.8% of DDoS flows use 3333
+verdict    port concentration; run ablation first
 
 <span class="code-muted"># reproduce</span>
-flowlab demo --report out/report.md</code></pre>
+uv run flowlab demo --leaky --html out/report.html</code></pre>
       </div>
     </section>
 
@@ -211,6 +215,7 @@ flowlab demo --report out/report.md</code></pre>
     <div class="footer-meta">
       <span>Apache-2.0</span>
       <a href="https://github.com/ZhuQuan181/traceledger/blob/master/docs/ARCHITECTURE.md">Architecture</a>
+      <a href="https://github.com/ZhuQuan181/traceledger/blob/master/docs/OPTIMIZATION-ROADMAP.md">Roadmap</a>
       <a href="https://github.com/ZhuQuan181/traceledger">GitHub</a>
       <a href="../" hreflang="zh-CN" lang="zh-CN">中文</a>
     </div>
