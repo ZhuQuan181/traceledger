@@ -4,12 +4,14 @@
 """
 from __future__ import annotations
 
+import os
+import secrets
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -19,7 +21,52 @@ from flowlab.service import ExperimentSpec, demo_frame, execute
 from flowlab.store import get_run, list_runs, save_run
 
 app = FastAPI(title="FlowLab", version="0.4.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+PICKLE_TOKEN = secrets.token_urlsafe(32)
+MAX_UPLOAD_BYTES = int(os.getenv("FLOWLAB_MAX_UPLOAD_MB", "1024")) * 1024 * 1024
+MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _same_origin(origin: str, request: Request) -> bool:
+    """只信任同源页面；兼容 Vite 代理与本机回环别名。"""
+    parsed = urlparse(origin)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    origin_host = (parsed.hostname or "").lower()
+    request_host = (request.url.hostname or "").lower()
+    if not origin_host or not request_host:
+        return False
+    if origin_host == request_host:
+        return True
+    loopback = {"localhost", "127.0.0.1", "::1"}
+    return origin_host in loopback and request_host in loopback
+
+
+@app.middleware("http")
+async def reject_cross_site_writes(request: Request, call_next):
+    """阻止网页跨站触发写操作；无 Origin 的 CLI/curl 调用不受影响。"""
+    if request.method in MUTATING_METHODS and request.url.path.startswith("/api/"):
+        origin = request.headers.get("origin")
+        if (request.headers.get("sec-fetch-site") == "cross-site"
+                or (origin and not _same_origin(origin, request))):
+            return JSONResponse(
+                {"detail": "拒绝跨站请求；请从 FlowLab 页面操作"},
+                status_code=403,
+            )
+    return await call_next(request)
+
+
+def _check_pickle_token(token: str | None) -> None:
+    if not token or not secrets.compare_digest(token, PICKLE_TOKEN):
+        raise HTTPException(403, "加载 pickle 需要当前页面的会话令牌")
+
+
+def _check_upload_size(file: UploadFile, label: str) -> None:
+    if file.size is not None and file.size > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            413,
+            f"{label}超过上限 {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+        )
 
 
 class DemoRequest(BaseModel):
@@ -57,6 +104,12 @@ def formats():
     return {"formats": supported_formats()}
 
 
+@app.get("/api/session")
+def session():
+    """同源页面可读取会话令牌；跨站页面因同源策略无法读取。"""
+    return JSONResponse({"pickle_token": PICKLE_TOKEN}, headers={"Cache-Control": "no-store"})
+
+
 @app.post("/api/demo")
 def demo(req: DemoRequest):
     _validate(req.models)
@@ -78,9 +131,13 @@ async def upload(file: UploadFile = File(...), labels: UploadFile | None = File(
                  split: str = Form("temporal"), models: str = Form("mlp,iforest,autoencoder"),
                  threshold: float = Form(0.5), seed: int = Form(42),
                  ablate: str = Form(""), allow_pickle: bool = Form(False),
-                 save: bool = Form(True)):
+                 save: bool = Form(True),
+                 pickle_token: str | None = Header(None, alias="X-FlowLab-Pickle-Token")):
     mlist = [m.strip() for m in models.split(",") if m.strip()]
     _validate(mlist)
+    if allow_pickle:
+        _check_pickle_token(pickle_token)
+    _check_upload_size(file, "数据文件")
 
     name = file.filename or "upload"
     suffix = Path(name).suffix.lower()
@@ -93,6 +150,7 @@ async def upload(file: UploadFile = File(...), labels: UploadFile | None = File(
         p.write_bytes(data)
         lab_path = None
         if labels is not None:
+            _check_upload_size(labels, "标签文件")
             lab_data = await labels.read()
             if lab_data:
                 lab_path = Path(td) / f"labels{Path(labels.filename or 'labels.csv').suffix or '.csv'}"

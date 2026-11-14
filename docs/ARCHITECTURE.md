@@ -126,6 +126,10 @@ dataset_hash / n_train / n_test / threshold / seed / attack_train / top_flows / 
 9. **消融能推翻泄漏判断**：`test_ablation_can_clear_port_leak`（Δ<0.05 时不该判死）
 10. **结论 / 清单 / 徽标由同一个 verdict 驱动**：三处措辞不一致就是 bug
     （`test_unresolved_leak_blocks_even_if_not_hard` 盯这一条）
+11. **跨站写请求必须被拒绝**：API 不接受任意 Origin 的 POST/DELETE
+    （`test_cross_site_write_is_rejected`）
+12. **HTTP pickle 需要同源会话令牌**：防止恶意网页借 localhost 触发反序列化
+    （`test_pickle_upload_requires_session_token`）
 
 ## 六、这次重构做了什么（v0.4）
 

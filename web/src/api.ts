@@ -1,5 +1,7 @@
 import type { ModelInfo, Payload, RunRow } from "./types";
 
+let pickleTokenPromise: Promise<string> | null = null;
+
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text();
@@ -8,6 +10,19 @@ async function json<T>(res: Response): Promise<T> {
     throw new Error(msg || `请求失败 (${res.status})`);
   }
   return res.json() as Promise<T>;
+}
+
+async function getPickleToken(): Promise<string> {
+  if (!pickleTokenPromise) {
+    pickleTokenPromise = fetch("/api/session")
+      .then((res) => json<{ pickle_token: string }>(res))
+      .then((data) => data.pickle_token)
+      .catch((err) => {
+        pickleTokenPromise = null;
+        throw err;
+      });
+  }
+  return pickleTokenPromise;
 }
 
 export async function fetchModels(): Promise<ModelInfo[]> {
@@ -58,6 +73,8 @@ export async function runUpload(
   form.append("seed", String(p.seed));
   if (p.ablate) form.append("ablate", p.ablate);
   form.append("allow_pickle", String(allowPickle));
-  const res = await fetch("/api/upload", { method: "POST", body: form });
+  const headers: Record<string, string> = {};
+  if (allowPickle) headers["X-FlowLab-Pickle-Token"] = await getPickleToken();
+  const res = await fetch("/api/upload", { method: "POST", body: form, headers });
   return json<Payload>(res);
 }
