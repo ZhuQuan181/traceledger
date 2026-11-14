@@ -12,9 +12,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+SCHEMA_VERSION = 2
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
   id            TEXT PRIMARY KEY,
+  schema_version INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT NOT NULL,
   source        TEXT,
   dataset_hash  TEXT,
@@ -23,15 +25,29 @@ CREATE TABLE IF NOT EXISTS runs (
   threshold     REAL,
   rows          INTEGER,
   train         INTEGER,
+  validation    INTEGER,
   test          INTEGER,
   attack_train  INTEGER,
+  attack_validation INTEGER,
   attack_test   INTEGER,
   best_model    TEXT,
   best_auc      REAL,
+  best_validation_auc REAL,
+  models        TEXT,
+  fingerprint   TEXT,
   payload       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at DESC);
 """
+
+MIGRATION_COLUMNS = {
+    "schema_version": "INTEGER NOT NULL DEFAULT 1",
+    "validation": "INTEGER",
+    "attack_validation": "INTEGER",
+    "best_validation_auc": "REAL",
+    "models": "TEXT",
+    "fingerprint": "TEXT",
+}
 
 
 def db_path() -> Path:
@@ -44,20 +60,37 @@ def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(db_path())
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+    for name, definition in MIGRATION_COLUMNS.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {definition}")
+    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn
 
 
 def save_run(payload: dict) -> str:
     """存一份前端同构的 payload，返回 run id。"""
     results = payload.get("results") or []
-    best = max(results, key=lambda r: r["metrics"].get("auc") or 0) if results else None
+    best_model = payload.get("best_model")
+    best = next((r for r in results if r.get("model") == best_model), None)
+    if best is None and results:
+        best = max(
+            results,
+            key=lambda r: (r.get("validation_metrics") or {}).get("auc") or -1,
+        )
     ds = payload.get("dataset") or {}
     rid = uuid.uuid4().hex[:10]
     with connect() as conn:
         conn.execute(
-            """INSERT INTO runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            """INSERT INTO runs (
+              id, schema_version, created_at, source, dataset_hash, split, seed,
+              threshold, rows, train, validation, test, attack_train,
+              attack_validation, attack_test, best_model, best_auc,
+              best_validation_auc, models, fingerprint, payload
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 rid,
+                SCHEMA_VERSION,
                 datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
                 ds.get("source"),
                 ds.get("hash"),
@@ -66,11 +99,19 @@ def save_run(payload: dict) -> str:
                 ds.get("threshold"),
                 ds.get("rows"),
                 ds.get("train"),
+                ds.get("validation"),
                 ds.get("test"),
                 (results[0].get("attack_train") if results else 0),
+                (results[0].get("attack_validation") if results else 0),
                 (best["metrics"].get("attack_support") if best else 0),
-                best["model"] if best else None,
+                best_model or (best["model"] if best else None),
                 best["metrics"].get("auc") if best else None,
+                ((best.get("validation_metrics") or {}).get("auc") if best else None),
+                json.dumps(
+                    [row.get("model") for row in results if row.get("model")],
+                    ensure_ascii=False,
+                ),
+                payload.get("experiment_fingerprint"),
                 json.dumps(payload, ensure_ascii=False),
             ),
         )
@@ -80,11 +121,17 @@ def save_run(payload: dict) -> str:
 def list_runs(limit: int = 20) -> list[dict]:
     with connect() as conn:
         rows = conn.execute(
-            "SELECT id,created_at,source,dataset_hash,split,rows,best_model,best_auc "
+            "SELECT id,schema_version,created_at,source,dataset_hash,split,rows,"
+            "validation,best_model,best_auc,best_validation_auc,models,fingerprint "
             "FROM runs ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for row in rows:
+        item = dict(row)
+        item["models"] = json.loads(item["models"]) if item.get("models") else []
+        out.append(item)
+    return out
 
 
 def get_run(run_id: str) -> dict | None:
@@ -104,6 +151,12 @@ def compare(run_ids: list[str]) -> list[dict]:
         if r:
             rows.append(r)
     return rows
+
+
+def delete_run(run_id: str) -> bool:
+    with connect() as conn:
+        deleted = conn.execute("DELETE FROM runs WHERE id = ?", (run_id,)).rowcount
+    return bool(deleted)
 
 
 def count() -> int:
