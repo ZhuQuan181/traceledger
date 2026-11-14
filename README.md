@@ -11,8 +11,8 @@
 > **把网络流量异常检测的研究模型，变成能跑、能复现、能解释的系统。**
 
 - 创建：2026-11-11
-- 当前版本：**v0.6.0**（2026-11-15：可复现性加固、PR-AUC、调查线索、移动端导航、Docker）
-- 测试：**125 个后端测试 + 11 个前端测试**；pcap 测试需要本机 `tshark`
+- 当前版本：**v0.7.0**（2026-11-15：验证集选模、实体切分、阈值扫描、历史迁移、可访问性与发布自动化）
+- 测试：**141 个后端测试 + 14 个前端测试**；pcap 测试需要本机 `tshark`
 - 文档语言：中文为主，提供英文 README；代码与接口用英文
 - 在线项目页：https://zhuquan181.github.io/traceledger/
 - 示例报告：https://zhuquan181.github.io/traceledger/demo-report.html
@@ -34,6 +34,8 @@ uv run flowlab sample --rows 2000          # 生成一份样例 CSV（可直接�
 uv run flowlab demo                        # 合成数据跑一次
 uv run flowlab demo --report out/report.md --html out/report.html
 uv run flowlab run my.csv --split temporal # 跑自己的 CSV（需要 label 列）
+uv run flowlab run my.csv --split group     # 按实体分组，评估新主机/新会话泛化
+uv run flowlab run my.csv --threshold-mode f1  # 只用验证集选择阈值
 uv run flowlab run cap.pcap                # pcap + 同名 cap.pcap.labels.csv 自动对齐
 uv run flowlab run cap.pcap --labels l.csv # 或显式指定标签文件
 uv run flowlab run feats.npz              # npy / npz / parquet / json / jsonl / pkl / xlsx
@@ -75,7 +77,8 @@ Docker 镜像同时包含 Python API 和构建后的 Web UI；容器默认只映
 | `flowlab show ID` | 回看某次实验，可导出 MD / HTML |
 | `flowlab compare ID1 ID2` | 跨实验对比最佳指标 |
 
-通用参数：`--models mlp,iforest`、`--split temporal|random`、`--test-size`、`--seed`、`--threshold`、
+通用参数：`--models mlp,iforest`、`--split temporal|random|group`、`--test-size`、
+`--validation-size`、`--threshold-mode fixed|f1`、`--threshold`、`--seed`、
 `--ablate COLUMN`（去掉某列重跑，量化它撑了多少指标）、`--html PATH`（单文件报告）、
 `--report PATH`（Markdown）、`--json`、`--no-save`。
 
@@ -83,18 +86,19 @@ Docker 镜像同时包含 Python API 和构建后的 Web UI；容器默认只映
 
 - **质量门禁**：Ruff 检查与格式校验；Python 3.11 / 3.13 跑完整后端测试
 - **前端**：组件测试、全量依赖审计、生产构建
-- **打包**：构建 wheel，验证内置 Web UI，在独立虚拟环境安装后跑一次真实 CLI
+- **打包**：同时验证“没有前端产物的源码 checkout 可安装”和“发布 wheel 内置 Web UI”
 - **容器**：每次 CI 都执行 Docker build
 - **Pages**：部署中英文项目页和一份真实生成的静态报告
 - **本地工作台**：Pages 只承载介绍页；完整 Web 工作台需要本机 Python 后端（`flowlab serve`）
 
-## v0.6 的重点
+## v0.7 的重点
 
-- **数据正确性**：接受常见标签列名；清洗 `inf/-inf`；标签缺失时显式失败，绝不把未标注流当成攻击。
-- **可复现性**：记录数据指纹、实验指纹、种子、切分、特征与来源；时间切分退化时会明确标注。
-- **调查能力**：新增 PR-AUC、按攻击类型的召回/误报率、典型 FP/FN、按源 IP 的告警排序。
-- **界面**：桌面三栏工作台；移动端提供配置、历史、报告三个抽屉；历史记录可恢复完整参数。
-- **交付**：wheel/sdist 内含前端；提供 Dockerfile 与 Compose；npm 全量审计为 0 漏洞。
+- **方法学**：训练 / 验证 / 测试三段式；验证集选择模型与自动阈值，测试集只在最后报告一次。
+- **切分审计**：检查跨集重复行与实体重叠；新增按 `flow_id` / 五元组 / 源 IP 分组切分。
+- **阈值**：支持验证集 F1 自动选阈值，并展示测试集阈值扫描与 F1/FPR/召回权衡。
+- **界面**：配置修改后明确提示结果过期；报告支持 Markdown/HTML/JSON/CSV；移动抽屉补焦点陷阱与 `aria-modal`。
+- **历史与发布**：SQLite schema v2 原位迁移，删除单条历史；tag 自动构建 wheel/sdist、校验和与 GitHub Release。
+- **打包修复**：源码 checkout 在没有 `web/dist` 时也能 `uv sync`、构建和安装。
 
 更完整的后续优先级和验收标准见 [优化路线图](docs/OPTIMIZATION-ROADMAP.md)。
 
@@ -105,7 +109,7 @@ CSV / pcap
    ↓ ingest        列名标准化、分隔符/编码嗅探、五元组聚合
    ↓ features      泄漏检测 → 训练/测试分离的预处理
    ↓ models        registry 插件（mlp / iforest / autoencoder / 你的）
-   ↓ eval          时间/随机切分 → AUC·PR-AUC·F1·FPR·类别召回·调查线索
+   ↓ eval          时间/随机/实体切分 → 验证集选模 → 测试集 AUC·PR-AUC·F1·FPR·调查线索
    ↓ report/api    报告含：指纹、种子、特征清单、类别分布、混淆矩阵、复现命令
   ↓ store         SQLite 实验历史（本地，不上传）
 ```

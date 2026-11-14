@@ -62,18 +62,18 @@
           <div><dt>输入</dt><dd>14 种格式</dd></div>
           <div><dt>审计</dt><dd>4 类泄漏</dd></div>
           <div><dt>模型</dt><dd>3 个基线</dd></div>
-          <div><dt>测试</dt><dd>125 + 11</dd></div>
+          <div><dt>测试</dt><dd>141 + 14</dd></div>
         </dl>
       </div>
 
       <figure class="hero-figure">
         <div class="figure-bar">
-          <span>RUN 44a1977407</span>
+          <span>RUN b4daefa19</span>
           <span>synthetic · temporal</span>
         </div>
         <img src="./assets/workspace.png" width="1440" height="900"
              alt="FlowLab 工作台截图：左侧配置实验，中间展示结论、指标与消融，右侧给出泄漏和下一步建议。">
-        <figcaption>v0.6 工作台：配置、证据和下一步在同一屏内。</figcaption>
+        <figcaption>v0.7 工作台：配置、证据和下一步在同一屏内。</figcaption>
       </figure>
     </section>
 
@@ -109,11 +109,11 @@
         <dl class="ledger">
           <div>
             <dt>配置</dt>
-            <dd>数据来源、时间/随机切分、测试集比例、种子、模型、阈值和消融列。上传数据后，消融列从实际特征中读取。</dd>
+            <dd>数据来源、时间/随机/实体分组切分、验证集与测试集比例、种子、模型、阈值策略和消融列。验证集负责选模型，测试集只报最终成绩。</dd>
           </div>
           <div>
             <dt>证据</dt>
-            <dd>AUC、PR-AUC、F1、误报率、混淆矩阵、分数曲线、类别分布和参与训练的特征清单。</dd>
+            <dd>验证 AUC、测试 AUC、PR-AUC、F1、误报率、混淆矩阵、分数曲线、阈值扫描、类别分布和特征清单。</dd>
           </div>
           <div>
             <dt>判断</dt>
@@ -121,7 +121,7 @@
           </div>
           <div>
             <dt>下一步</dt>
-            <dd>按泄漏列重跑、做消融、查看最可疑的流、按攻击类型和源 IP 调查，或导出 HTML / Markdown。</dd>
+            <dd>按泄漏列重跑、做消融、查看最可疑的流、按攻击类型和源 IP 调查，或导出 HTML / Markdown / JSON / CSV。</dd>
           </div>
         </dl>
       </div>
@@ -140,12 +140,12 @@
         </li>
         <li>
           <span class="step-no">02</span>
-          <div><h3>审计</h3><p>检查标识符、端口、目标泄漏和随机切分带来的时间泄漏。</p></div>
+          <div><h3>审计</h3><p>检查标识符、端口、目标泄漏、跨集重复与实体重叠，以及随机切分带来的时间泄漏。</p></div>
           <code>--ablate dst_port</code>
         </li>
         <li>
           <span class="step-no">03</span>
-          <div><h3>对比</h3><p>MLP、Isolation Forest、AutoEncoder 共用同一份特征矩阵和阈值。</p></div>
+          <div><h3>对比</h3><p>MLP、Isolation Forest、AutoEncoder 共用同一份特征矩阵；验证集选模型，测试集报成绩。</p></div>
           <code>--models mlp,iforest,autoencoder</code>
         </li>
         <li>
@@ -162,21 +162,21 @@
         <p>
           同一份 payload 驱动网页、Markdown 和自包含 HTML。
           拿到报告的人可以看到结论为什么成立，也可以按指纹和命令重新跑一次；
-          报告同时包含 PR-AUC、分类召回和典型误报/漏报。
+          报告同时包含验证/测试指标、阈值来源、PR-AUC、分类召回和典型误报/漏报。
         </p>
         <a class="report-link" href="./demo-report.html">打开实际生成的示例报告</a>
       </div>
       <div class="report-sample" aria-label="示例报告中的泄漏检查片段">
         <div class="sample-bar"><span>demo-report.html</span><span>standalone</span></div>
         <pre><code><span class="code-muted"># 结论</span>
-<span class="code-warn">先做消融，再决定指标能不能用</span>
+<span class="code-warn">可用于同分布结论，但不能外推到新实体</span>
 
 <span class="code-muted"># 检查</span>
-port_leak  类别 DDoS 中 95.8% 走 3333
-verdict    端口集中，建议先做消融
+entity_overlap  同一 flow_id 出现在多个子集
+threshold       验证集 F1 自动选择
 
 <span class="code-muted"># 复现</span>
-uv run flowlab demo --leaky --html out/report.html</code></pre>
+uv run flowlab demo --threshold-mode f1 --html out/report.html</code></pre>
       </div>
     </section>
 

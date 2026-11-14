@@ -63,18 +63,18 @@
           <div><dt>Input</dt><dd>14 formats</dd></div>
           <div><dt>Audit</dt><dd>4 leak types</dd></div>
           <div><dt>Models</dt><dd>3 baselines</dd></div>
-          <div><dt>Tests</dt><dd>125 + 11</dd></div>
+          <div><dt>Tests</dt><dd>141 + 14</dd></div>
         </dl>
       </div>
 
       <figure class="hero-figure">
         <div class="figure-bar">
-          <span>RUN 44a1977407</span>
+          <span>RUN b4daefa19</span>
           <span>synthetic · temporal</span>
         </div>
         <img src="../assets/workspace.png" width="1440" height="900"
              alt="FlowLab workbench screenshot: experiment configuration on the left, verdict and metrics in the center, leakage and next steps on the right.">
-        <figcaption>v0.6 workbench: configuration, evidence, and next steps in one view.</figcaption>
+        <figcaption>v0.7 workbench: configuration, evidence, and next steps in one view.</figcaption>
       </figure>
     </section>
 
@@ -111,11 +111,11 @@
         <dl class="ledger">
           <div>
             <dt>Setup</dt>
-            <dd>Data source, temporal or random split, test size, seed, models, threshold, and ablation column. After an upload, the ablation list is populated from the features actually used.</dd>
+            <dd>Data source, temporal/random/entity split, validation and test sizes, seed, models, threshold policy, and ablation column. Validation selects the model; test is reported once.</dd>
           </div>
           <div>
             <dt>Evidence</dt>
-            <dd>AUC, PR-AUC, F1, false-positive rate, confusion matrix, score curve, class distribution, and the exact feature list used in training.</dd>
+            <dd>Validation AUC, test AUC, PR-AUC, F1, false-positive rate, confusion matrix, score curve, threshold sweep, class distribution, and the exact feature list used in training.</dd>
           </div>
           <div>
             <dt>Verdict</dt>
@@ -123,7 +123,7 @@
           </div>
           <div>
             <dt>Next step</dt>
-            <dd>Rerun without a leaking column, test an ablation, inspect the most suspicious flows, investigate by attack type and source IP, or export HTML / Markdown.</dd>
+            <dd>Rerun without a leaking column, test an ablation, inspect the most suspicious flows, investigate by attack type and source IP, or export HTML / Markdown / JSON / CSV.</dd>
           </div>
         </dl>
       </div>
@@ -142,17 +142,17 @@
         </li>
         <li>
           <span class="step-no">02</span>
-          <div><h3>Audit</h3><p>Check identifier, port, and target leakage, plus temporal leakage introduced by random splits.</p></div>
+          <div><h3>Audit</h3><p>Check identifier, port, target, duplicate-row, entity-overlap, and temporal leakage introduced by random splits.</p></div>
           <code>--ablate dst_port</code>
         </li>
         <li>
           <span class="step-no">03</span>
-          <div><h3>Compare</h3><p>MLP, Isolation Forest, and AutoEncoder share the same feature matrix and threshold.</p></div>
+          <div><h3>Compare</h3><p>MLP, Isolation Forest, and AutoEncoder share one feature matrix; validation selects the model and test reports the score.</p></div>
           <code>--models mlp,iforest,autoencoder</code>
         </li>
         <li>
           <span class="step-no">04</span>
-          <div><h3>Archive</h3><p>The report records dataset fingerprint, seed, split, features, metrics, and suspicious flows.</p></div>
+          <div><h3>Archive</h3><p>The report records dataset fingerprint, seed, split, threshold source, validation/test metrics, features, and suspicious flows.</p></div>
           <code>--html out/report.html</code>
         </li>
       </ol>
@@ -173,14 +173,14 @@
       <div class="report-sample" aria-label="Leakage-check excerpt from the sample report">
         <div class="sample-bar"><span>demo-report.html</span><span>standalone</span></div>
         <pre><code><span class="code-muted"># verdict</span>
-<span class="code-warn">Run ablation before trusting the metrics</span>
+<span class="code-warn">Valid for same-distribution results, not new entities</span>
 
 <span class="code-muted"># checks</span>
-port_leak  95.8% of DDoS flows use 3333
-verdict    port concentration; run ablation first
+entity_overlap  one flow_id spans multiple subsets
+threshold       selected by validation-set F1
 
 <span class="code-muted"># reproduce</span>
-uv run flowlab demo --leaky --html out/report.html</code></pre>
+uv run flowlab demo --threshold-mode f1 --html out/report.html</code></pre>
       </div>
     </section>
 

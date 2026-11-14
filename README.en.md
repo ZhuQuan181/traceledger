@@ -13,8 +13,8 @@
 > **Turn network traffic anomaly detection research models into systems that run, reproduce, and explain.**
 
 - Created: 2026-11-11
-- Current version: **v0.6.0** (2026-11-15: reproducibility hardening, PR-AUC, investigation views, mobile navigation, Docker)
-- Tests: **125 backend tests + 11 frontend tests**; pcap tests require `tshark`
+- Current version: **v0.7.0** (2026-11-15: validation-based selection, entity-aware splitting, threshold sweeps, history migration, accessibility, release automation)
+- Tests: **141 backend tests + 14 frontend tests**; pcap tests require `tshark`
 - Documentation: Chinese and English READMEs, with design docs in Chinese; code and interfaces are in English
 - Project site: https://zhuquan181.github.io/traceledger/en/
 - Sample report: https://zhuquan181.github.io/traceledger/demo-report.html
@@ -35,6 +35,8 @@ uv run flowlab sample --rows 2000          # Generate a sample CSV
 uv run flowlab demo                        # Run the full pipeline on synthetic data
 uv run flowlab demo --report out/report.md --html out/report.html
 uv run flowlab run my.csv --split temporal # Run your own CSV (requires a label column)
+uv run flowlab run my.csv --split group     # Hold out whole entities for new-host generalization
+uv run flowlab run my.csv --threshold-mode f1  # Choose the threshold on validation only
 uv run flowlab run cap.pcap                # Auto-align cap.pcap.labels.csv
 uv run flowlab run cap.pcap --labels l.csv # Or pass a label file explicitly
 uv run flowlab run feats.npz               # npy / npz / parquet / json / jsonl / pkl / xlsx
@@ -77,7 +79,8 @@ loopback interface only.
 | `flowlab show ID` | Inspect a run and export Markdown / HTML |
 | `flowlab compare ID1 ID2` | Compare best metrics across runs |
 
-Shared flags: `--models mlp,iforest`, `--split temporal|random`, `--test-size`, `--seed`, `--threshold`,
+Shared flags: `--models mlp,iforest`, `--split temporal|random|group`, `--test-size`,
+`--validation-size`, `--threshold-mode fixed|f1`, `--threshold`, `--seed`,
 `--ablate COLUMN` (drop one column and rerun to quantify its contribution),
 `--html PATH` (standalone HTML), `--report PATH` (Markdown), `--json`, `--no-save`.
 
@@ -85,18 +88,19 @@ Shared flags: `--models mlp,iforest`, `--split temporal|random`, `--test-size`, 
 
 - **Quality**: Ruff checks and format validation; the full backend suite on Python 3.11 and 3.13
 - **Frontend**: component tests, a full dependency audit, and a production build
-- **Packaging**: builds a wheel, verifies the embedded Web UI, installs it in a clean environment, and runs a real CLI smoke test
+- **Packaging**: verifies both a source checkout without frontend assets and a release wheel with the embedded Web UI
 - **Container**: builds the Docker image on every CI run
 - **Pages**: deploys the Chinese and English project sites plus a real generated report
 - **Local workbench**: GitHub Pages hosts the introduction only; the full Web UI needs the local Python backend (`flowlab serve`)
 
-## Highlights in v0.6
+## Highlights in v0.7
 
-- **Data correctness**: accepts common label-column names, cleans `inf/-inf`, and fails explicitly on missing labels instead of treating unlabeled flows as attacks.
-- **Reproducibility**: records dataset and experiment fingerprints, seed, split, features, and source; temporal fallback is called out explicitly.
-- **Investigation**: PR-AUC, recall/false-alarm rate by attack type, representative FP/FN examples, and source-IP alert ranking.
-- **Interface**: three-column desktop workbench; mobile drawers for setup, history, and reports; history restores the full experiment configuration.
-- **Delivery**: wheel/sdist include the frontend; Dockerfile and Compose are included; the full npm audit reports zero vulnerabilities.
+- **Methodology**: train / validation / test splits; the validation set selects models and automatic thresholds, while the test set is reported once.
+- **Split audit**: detects duplicate rows and entity overlap across splits; adds grouped splitting by `flow_id`, five-tuple, or source IP.
+- **Thresholds**: optional validation-only F1 threshold selection, plus a test-set diagnostic sweep over F1/FPR/recall.
+- **Interface**: stale-result warnings after configuration changes; Markdown/HTML/JSON/CSV export; focus trapping and `aria-modal` for mobile drawers.
+- **History and releases**: in-place SQLite schema v2 migration, single-run deletion, and tag-driven wheel/sdist/checksum/GitHub Release automation.
+- **Packaging fix**: source checkouts without `web/dist` can now sync, build, and install.
 
 See the [optimization roadmap](docs/OPTIMIZATION-ROADMAP.md) for the next priorities and acceptance criteria.
 
@@ -107,7 +111,7 @@ CSV / pcap
    ↓ ingest        normalize columns, sniff delimiters/encoding, aggregate five-tuples
    ↓ features      leakage checks → preprocessors fitted on the training split only
    ↓ models        plugin registry (mlp / iforest / autoencoder / your model)
-   ↓ eval          temporal/random split → AUC · PR-AUC · F1 · FPR · class recall · investigation
+   ↓ eval          temporal/random/group split → validation model selection → test metrics and investigation
    ↓ report/api    fingerprint, seed, feature list, class distribution, confusion matrix, rerun command
   ↓ store          local SQLite experiment history (never uploaded)
 ```
