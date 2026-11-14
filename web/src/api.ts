@@ -42,6 +42,7 @@ export async function loadRun(id: string): Promise<Payload> {
 export type RunParams = {
   seed: number;
   split: "temporal" | "random";
+  test_size: number;
   models: string[];
   threshold: number;
   ablate?: string | null;
@@ -68,6 +69,7 @@ export async function runUpload(
   form.append("file", file);
   if (labels) form.append("labels", labels);
   form.append("split", p.split);
+  form.append("test_size", String(p.test_size));
   form.append("models", p.models.join(","));
   form.append("threshold", String(p.threshold));
   form.append("seed", String(p.seed));

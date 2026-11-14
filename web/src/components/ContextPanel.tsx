@@ -1,26 +1,37 @@
 import type { Payload } from "../types";
 import { LeakList } from "./LeakList";
 
-export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, onRerunWithout, copied }: {
+export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, onRerunWithout,
+                              copied, onCloseMobile }: {
   payload: Payload | null;
   onCopy: () => void;
   onDownloadMd: () => void;
   onDownloadHtml: () => void;
   onRerunWithout: (column: string) => void;
   copied: boolean;
+  onCloseMobile: () => void;
 }) {
   const d = payload?.dataset;
-  const portLeak = payload?.warnings.find((w) => w.rule === "port_leak");
-  const anyLeak = payload?.warnings.find((w) => w.rule === "id_leak" || w.rule === "target_leak") ?? portLeak;
+  const usedFeatures = new Set(payload?.dataset.features?.used ?? []);
+  const rerunLeak = payload?.warnings.find((w) =>
+    (w.rule === "id_leak" || w.rule === "target_leak" || w.rule === "port_leak")
+    && w.columns.some((c) => usedFeatures.has(String(c)))
+  );
 
   return (
     <aside className="context">
+      <button className="drawer-close drawer-close-right" onClick={onCloseMobile}>
+        关闭报告栏
+      </button>
       <section>
-        <h2>泄漏检查 {payload && <span className={`badge ${payload.warnings.length ? "warn" : "ok"}`}>{payload.warnings.length}</span>}</h2>
+        <h2>数据审计 {payload && <span className={`badge ${payload.warnings.length ? "warn" : "ok"}`}>{payload.warnings.length}</span>}</h2>
         {payload ? <LeakList warnings={payload.warnings} /> : <p className="hint">跑一次实验后显示。</p>}
-        {anyLeak && (
-          <button className="wide-btn act" onClick={() => onRerunWithout(anyLeak.columns[0] as string)}>
-            → 去掉 {String(anyLeak.columns[0])} 重跑，对比 AUC 变化
+        {rerunLeak && (
+          <button className="wide-btn act"
+                  onClick={() => onRerunWithout(
+                    String(rerunLeak.columns.find((c) => usedFeatures.has(String(c))))
+                  )}>
+            → 去掉 {String(rerunLeak.columns.find((c) => usedFeatures.has(String(c))))} 重跑，对比 AUC 变化
           </button>
         )}
       </section>
@@ -69,9 +80,11 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
           <h2>实验信息</h2>
           <dl className="facts">
             <dt>指纹</dt><dd className="mono">{d.hash}</dd>
+            {d.experiment_fingerprint && <><dt>实验指纹</dt><dd className="mono">{d.experiment_fingerprint}</dd></>}
             <dt>格式</dt><dd>{d.format?.format ?? "—"}</dd>
             <dt>标签</dt><dd>{d.labels?.mode ?? "—"}{d.labels?.total ? ` (${d.labels.labelled}/${d.labels.total})` : ""}</dd>
-            <dt>切分</dt><dd>{d.split === "temporal" ? "时间切分" : "随机切分"}</dd>
+            <dt>切分</dt><dd>{d.split === "temporal" ? "时间切分"
+              : d.split_requested === "temporal" ? "随机（已退化）" : "随机切分"}</dd>
             <dt>种子</dt><dd className="mono">{d.seed ?? 42}</dd>
             <dt>速率兜底</dt><dd className="mono">{d.engineering?.min_duration_ms ?? 1} ms</dd>
           </dl>
@@ -97,6 +110,16 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
               <li>测试集只有 {payload.dataset.test} 条，建议加大样本再下结论。</li>
             )}
           </ul>
+        </section>
+      )}
+
+      {payload?.experiment?.command && (
+        <section>
+          <h2>复现命令</h2>
+          <details className="command-details">
+            <summary>查看本次实验命令</summary>
+            <pre>{payload.experiment.command}</pre>
+          </details>
         </section>
       )}
 

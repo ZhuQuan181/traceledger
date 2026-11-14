@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchHistory, fetchModels, loadRun, runDemo, runUpload } from "./api";
 import { num, pct, secs } from "./format";
 import type { ModelInfo, Payload, RunRow } from "./types";
@@ -12,8 +12,11 @@ import { TopFlows } from "./components/TopFlows";
 import { VerdictCard } from "./components/VerdictCard";
 import { ChecklistCard } from "./components/ChecklistCard";
 import { FlowPreview } from "./components/FlowPreview";
+import { InvestigationPanel } from "./components/InvestigationPanel";
+import { HistoryList } from "./components/HistoryList";
 
 const ALL = ["mlp", "iforest", "autoencoder"];
+type MobilePanel = "config" | "history" | "context" | null;
 
 export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -23,6 +26,8 @@ export default function App() {
   const [attack, setAttack] = useState(500);
   const [leaky, setLeaky] = useState(false);
   const [split, setSplit] = useState<"temporal" | "random">("temporal");
+  const [testSize, setTestSize] = useState(0.3);
+  const [seed, setSeed] = useState(42);
   const [threshold, setThreshold] = useState(0.5);
   const [ablate, setAblate] = useState("");
   const [ablationColumns, setAblationColumns] = useState<string[]>([]);
@@ -34,11 +39,37 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [historyNotice, setHistoryNotice] = useState<string | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
+  const requestInFlight = useRef(false);
 
   useEffect(() => {
     fetchModels().then(setModels).catch(() =>
       setModels(ALL.map((n) => ({ name: n, kind: n === "mlp" ? "supervised" : "unsupervised" }))));
     refreshHistory();
+  }, []);
+
+  useEffect(() => {
+    if (!mobilePanel) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobilePanel(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [mobilePanel]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 900px)");
+    const onChange = () => {
+      if (!media.matches) setMobilePanel(null);
+    };
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
   }, []);
 
   function refreshHistory() {
@@ -50,7 +81,54 @@ export default function App() {
     return payload.results.reduce((a, b) => ((b.metrics.auc ?? 0) > (a.metrics.auc ?? 0) ? b : a));
   }, [payload]);
 
-  function applyPayload(data: Payload, preferredAblate?: string) {
+  function restoreConfig(data: Payload, restoreSource: boolean) {
+    const exp = data.experiment;
+    if (!exp) {
+      if (restoreSource) {
+        setHistoryNotice("这次历史记录生成于旧版本，未保存完整运行配置；必须手动核对数据与参数后再重跑。");
+      }
+      return;
+    }
+    setSelected(exp.models);
+    setSplit(exp.split);
+    setTestSize(exp.test_size ?? 0.3);
+    setSeed(exp.seed ?? 42);
+    setThreshold(exp.threshold ?? 0.5);
+    setAblate(exp.ablate ?? "");
+    setNormal(exp.normal ?? 5000);
+    setAttack(exp.attack ?? 500);
+    setLeaky(Boolean(exp.leaky));
+    if (exp.source_kind === "demo") {
+      setSource("demo");
+      if (restoreSource) {
+        setFile(null);
+        setLabelsFile(null);
+      }
+      setHistoryNotice(null);
+    } else {
+      setSource("file");
+      if (restoreSource) {
+        setFile(null);
+        setLabelsFile(null);
+        setHistoryNotice(
+          `这次实验来自上传文件「${exp.source_ref || "未知文件"}」。浏览器不能恢复本地文件，`
+          + "请重新选择同一数据与标签文件后再重跑。"
+        );
+      }
+    }
+  }
+
+  function revealResults() {
+    if (!window.matchMedia("(max-width: 900px)").matches) return;
+    window.requestAnimationFrame(() => {
+      document.getElementById("result-start")?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start",
+      });
+    });
+  }
+
+  function applyPayload(data: Payload, preferredAblate?: string, restoreSource = false) {
     setPayload(data);
     const used = data.dataset.features?.used ?? [];
     setAblationColumns(used);
@@ -58,9 +136,11 @@ export default function App() {
       const target = preferredAblate ?? current;
       return target && used.includes(target) ? target : "";
     });
+    restoreConfig(data, restoreSource);
   }
 
   async function run(override?: { ablate?: string }) {
+    if (requestInFlight.current) return;
     if (selected.length === 0) {
       setError("至少选择一个模型。");
       return;
@@ -73,32 +153,47 @@ export default function App() {
       setError("正常流需在 100–200,000 之间，攻击流需在 10–50,000 之间。");
       return;
     }
+    if (testSize < 0.05 || testSize > 0.5) {
+      setError("测试集比例需在 0.05–0.5 之间。");
+      return;
+    }
+    requestInFlight.current = true;
     setBusy(true);
     setError(null);
+    setMobilePanel(null);
     try {
       const ablateValue = override?.ablate ?? ablate;
-      const params = { seed: 42, split, models: selected, threshold, ablate: ablateValue || null };
+      const params = {
+        seed, split, test_size: testSize, models: selected, threshold,
+        ablate: ablateValue || null,
+      };
       const data = source === "demo"
         ? await runDemo({ ...params, normal, attack, leaky })
         : await runUpload(file!, params, labelsFile, allowPickle);
       applyPayload(data, ablateValue);
       refreshHistory();
+      revealResults();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setPayload(null);
     } finally {
+      requestInFlight.current = false;
       setBusy(false);
     }
   }
 
   async function openRun(id: string) {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
     setBusy(true);
     setError(null);
+    setMobilePanel(null);
     try {
-      applyPayload(await loadRun(id));
+      applyPayload(await loadRun(id), undefined, true);
+      revealResults();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
+      requestInFlight.current = false;
       setBusy(false);
     }
   }
@@ -112,6 +207,7 @@ export default function App() {
     setLabelsFile(null);
     setAblate("");
     setAblationColumns([]);
+    setHistoryNotice(null);
     setError(null);
     if (!/\.(pkl|pickle|p)$/i.test(next?.name ?? "")) setAllowPickle(false);
   }
@@ -166,12 +262,38 @@ export default function App() {
   const bestBadge = verdictLevel === "fail" ? (portLeakColumn ? `受 ${portLeakColumn} 影响` : "指标待复核")
     : verdictLevel === "warn" && suspicious ? "最高分 · 需换数据确认"
     : "最佳";
-  const sectionNo = payload?.ablation ? { flow: "04" } : { flow: "03" };
+  const flowNo = payload?.ablation ? 4 : 3;
+  const sectionNo = {
+    flow: String(flowNo).padStart(2, "0"),
+    investigation: String(flowNo + 1).padStart(2, "0"),
+  };
 
   return (
-    <div className="shell">
+    <div className={`shell mobile-panel-${mobilePanel ?? "none"}`}>
       <a className="skip" href="#main">跳到主要内容</a>
-      <TopBar payload={payload} busy={busy} runs={history} activeRun={payload?.run_id} onOpenRun={openRun} />
+      <TopBar payload={payload} busy={busy} runs={history} activeRun={payload?.run_id}
+              onOpenRun={openRun} mobilePanel={mobilePanel}
+              onOpenPanel={(panel) => setMobilePanel((current) => current === panel ? null : panel)} />
+
+      {mobilePanel && (
+        <button className="drawer-backdrop" aria-label="关闭侧栏"
+                onClick={() => setMobilePanel(null)} />
+      )}
+
+      {mobilePanel === "history" && (
+        <aside className="mobile-history-drawer" aria-label="最近实验">
+          <header>
+            <div>
+              <span>LOCAL HISTORY</span>
+              <h2>最近实验</h2>
+            </div>
+            <button className="drawer-close" onClick={() => setMobilePanel(null)}>关闭</button>
+          </header>
+          <HistoryList runs={history} active={payload?.run_id}
+                       onOpen={(id) => { openRun(id); }} />
+          <p className="hint">历史只保存在本机 SQLite 中；打开上传文件的记录后，需要重新选择原文件才能重跑。</p>
+        </aside>
+      )}
 
       <div className="workspace">
         <ConfigRail
@@ -189,15 +311,27 @@ export default function App() {
           normal={normal} attack={attack} onNormal={setNormal} onAttack={setAttack}
           leaky={leaky} onLeaky={setLeaky}
           split={split} onSplit={setSplit}
+          testSize={testSize} onTestSize={setTestSize}
+          seed={seed} onSeed={setSeed}
           threshold={threshold} onThreshold={setThreshold}
           ablate={ablate} onAblate={setAblate} ablationColumns={ablationColumns}
           file={file} onFile={selectFile}
           labelsFile={labelsFile} onLabelsFile={setLabelsFile}
           allowPickle={allowPickle} onAllowPickle={setAllowPickle}
-          busy={busy} onRun={() => run()} error={error}
+          busy={busy} onRun={() => run()} error={error} notice={historyNotice}
+          onCloseMobile={() => setMobilePanel(null)}
         />
 
         <main className="canvas" id="main">
+          {error && (
+            <div className="run-error" role="alert">
+              <span>{error}</span>
+              <button type="button" onClick={() => setError(null)} aria-label="关闭错误提示">
+                关闭
+              </button>
+            </div>
+          )}
+
           {!payload && !busy && (
             <section className="intro">
               <div className="intro-copy">
@@ -234,7 +368,7 @@ export default function App() {
 
           {payload && d && best && (
             <>
-              <header className="head">
+              <header className="head" id="result-start">
                 <div className="head-kicker">
                   RUN {payload.run_id ?? "—"} <span className="dot-sep">·</span> {d.format?.format ?? "data"}
                 </div>
@@ -242,7 +376,8 @@ export default function App() {
                 <p className="head-sub">
                   {d.rows.toLocaleString()} 条流 <span className="dot-sep">/</span> 训练 {d.train.toLocaleString()}{" "}
                   · 测试 {d.test.toLocaleString()} <span className="dot-sep">/</span>{" "}
-                  {d.split === "temporal" ? "时间切分" : "随机切分"}
+                  {d.split === "temporal" ? "时间切分"
+                    : d.split_requested === "temporal" ? "随机切分（时间切分已退化）" : "随机切分"}
                 </p>
                 <div className="split-meter" aria-hidden="true">
                   <span className="split-train" style={{ width: `${Math.round((d.train / d.rows) * 100)}%` }} />
@@ -323,7 +458,16 @@ export default function App() {
                   <span className="aside">{best.model} 打分 · 前 15 条</span>
                 </header>
                 <TopFlows flows={payload.top_flows}
+                          threshold={best.threshold ?? d.threshold}
                           leakPort={(payload.warnings.find((w) => w.rule === "port_leak")?.value) ?? null} />
+              </section>
+
+              <section className="block">
+                <header className="block-head">
+                  <h2><span className="idx">{sectionNo.investigation}</span>调查线索</h2>
+                  <span className="aside">按类型、源 IP 与典型错误拆开看</span>
+                </header>
+                <InvestigationPanel result={best} />
               </section>
 
               <p className="footnote">
@@ -341,6 +485,7 @@ export default function App() {
           onDownloadHtml={() => payload && save(payload.report_html, "text/html", "html")}
           onRerunWithout={(col) => { setAblate(col); run({ ablate: col }); }}
           copied={copied}
+          onCloseMobile={() => setMobilePanel(null)}
         />
       </div>
     </div>

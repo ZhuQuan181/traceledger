@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { Result } from "../types";
 import { int, num, pct, secs } from "../format";
 
-type Key = "auc" | "f1" | "fpr" | "duration_s";
+type Key = "auc" | "pr_auc" | "f1" | "fpr" | "duration_s";
 
 function val(r: Result, k: Key): number {
   if (k === "duration_s") return r.duration_s;
@@ -27,11 +27,12 @@ export function MetricMatrix({ results, bestModel, suspicious, badge }: {
         <thead>
           <tr className="group-row">
             <th scope="col" rowSpan={2} className="corner">模型</th>
-            <th scope="colgroup" colSpan={4} className="group">性能指标</th>
+            <th scope="colgroup" colSpan={5} className="group">性能指标</th>
             <th scope="colgroup" colSpan={4} className="group">混淆矩阵</th>
           </tr>
           <tr>
             {th("auc", "AUC")}
+            {th("pr_auc", "PR-AUC")}
             {th("f1", "F1")}
             {th("fpr", "误报率")}
             {th("duration_s", "耗时")}
@@ -59,6 +60,7 @@ export function MetricMatrix({ results, bestModel, suspicious, badge }: {
                   <i style={{ width: `${Math.round((r.metrics.auc ?? 0) * 100)}%` }} />
                 </span>
               </td>
+              <td className="num">{num(r.metrics.pr_auc)}</td>
               <td className="num">{num(r.metrics.f1)}</td>
               <td className="num">{pct(r.metrics.fpr)}</td>
               <td className="num muted">{secs(r.duration_s)}</td>

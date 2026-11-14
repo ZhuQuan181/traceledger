@@ -11,13 +11,16 @@ type Props = {
   leaky: boolean; onLeaky: (v: boolean) => void;
   split: "temporal" | "random";
   onSplit: (s: "temporal" | "random") => void;
+  testSize: number; onTestSize: (v: number) => void;
+  seed: number; onSeed: (v: number) => void;
   threshold: number; onThreshold: (t: number) => void;
   ablate: string; onAblate: (col: string) => void;
   ablationColumns: string[];
   file: File | null; onFile: (f: File | null) => void;
   labelsFile: File | null; onLabelsFile: (f: File | null) => void;
   allowPickle: boolean; onAllowPickle: (v: boolean) => void;
-  busy: boolean; onRun: () => void; error: string | null;
+  busy: boolean; onRun: () => void; error: string | null; notice: string | null;
+  onCloseMobile: () => void;
 };
 
 const KIND_LABEL: Record<string, string> = { supervised: "监督", unsupervised: "无监督" };
@@ -27,14 +30,24 @@ export function ConfigRail(p: Props) {
 
   return (
     <aside className="rail">
+      <button className="drawer-close drawer-close-left" onClick={p.onCloseMobile}>
+        关闭配置
+      </button>
       <section>
         <h2>数据</h2>
-        <div className="seg" role="radiogroup" aria-label="数据来源">
-          <button role="radio" aria-checked={p.source === "demo"} className={p.source === "demo" ? "on" : ""}
-                  onClick={() => p.onSource("demo")}>合成数据</button>
-          <button role="radio" aria-checked={p.source === "file"} className={p.source === "file" ? "on" : ""}
-                  onClick={() => p.onSource("file")}>上传文件</button>
-        </div>
+        <fieldset className="seg">
+          <legend className="sr-only">数据来源</legend>
+          <label>
+            <input type="radio" name="data-source" checked={p.source === "demo"}
+                   onChange={() => p.onSource("demo")} />
+            <span>合成数据</span>
+          </label>
+          <label>
+            <input type="radio" name="data-source" checked={p.source === "file"}
+                   onChange={() => p.onSource("file")} />
+            <span>上传文件</span>
+          </label>
+        </fieldset>
 
         {p.source === "demo" ? (
           <>
@@ -55,13 +68,13 @@ export function ConfigRail(p: Props) {
           <>
             <label className={`drop ${p.file ? "filled" : ""}`}>
               <input type="file" name="flow-file"
-                     accept=".csv,.tsv,.json,.jsonl,.parquet,.npy,.npz,.pkl,.pickle,.xlsx,.xls,.pcap,.pcapng"
+                     accept=".csv,.tsv,.json,.jsonl,.parquet,.npy,.npz,.pkl,.pickle,.xlsx,.xls,.pcap,.pcapng,.log,.log.gz,.gz"
                      onChange={(e) => p.onFile(e.target.files?.[0] ?? null)} />
               <strong>{p.file ? p.file.name : "选择数据文件"}</strong>
-              <span>{p.file ? `${(p.file.size / 1024).toFixed(0)} KB` : "csv / json / parquet / npy / npz / pkl / pcap"}</span>
+              <span>{p.file ? `${(p.file.size / 1024).toFixed(0)} KB` : "csv / json / parquet / npy / npz / pkl / pcap / Zeek log"}</span>
             </label>
             <label className={`drop compact ${p.labelsFile ? "filled" : ""}`}>
-              <input type="file" name="labels-file" accept=".csv,.json,.jsonl,.parquet,.npy,.npz,.pkl,.xlsx"
+              <input type="file" name="labels-file" accept=".csv,.tsv,.json,.jsonl,.parquet,.xlsx,.xls"
                      onChange={(e) => p.onLabelsFile(e.target.files?.[0] ?? null)} />
               <strong>{p.labelsFile ? p.labelsFile.name : "标签文件（可选）"}</strong>
               <span>五元组 / flow_id / 行序</span>
@@ -78,14 +91,29 @@ export function ConfigRail(p: Props) {
 
       <section>
         <h2>切分</h2>
-        <div className="seg" role="radiogroup" aria-label="切分方式">
-          <button role="radio" aria-checked={p.split === "temporal"} className={p.split === "temporal" ? "on" : ""}
-                  onClick={() => p.onSplit("temporal")}>时间切分</button>
-          <button role="radio" aria-checked={p.split === "random"} className={p.split === "random" ? "on" : ""}
-                  onClick={() => p.onSplit("random")}>随机切分</button>
+        <fieldset className="seg">
+          <legend className="sr-only">切分方式</legend>
+          <label>
+            <input type="radio" name="split-mode" checked={p.split === "temporal"}
+                   onChange={() => p.onSplit("temporal")} />
+            <span>时间切分</span>
+          </label>
+          <label>
+            <input type="radio" name="split-mode" checked={p.split === "random"}
+                   onChange={() => p.onSplit("random")} />
+            <span>随机切分</span>
+          </label>
+        </fieldset>
+        <div className="pair">
+          <label><span>测试集比例</span>
+            <input type="number" name="test-size" min={0.05} max={0.5} step={0.05}
+                   value={p.testSize} onChange={(e) => p.onTestSize(Number(e.target.value))} /></label>
+          <label><span>随机种子</span>
+            <input type="number" name="seed" min={0} step={1}
+                   value={p.seed} onChange={(e) => p.onSeed(Number(e.target.value))} /></label>
         </div>
         <p className="hint">{p.split === "temporal"
-          ? "前 70% 训练、后 30% 测试。带时间戳时这是唯一诚实的做法。"
+          ? `前 ${Math.round((1 - p.testSize) * 100)}% 训练、后 ${Math.round(p.testSize * 100)}% 测试。带时间戳时这是唯一诚实的做法。`
           : "分层随机。若数据带时间戳，会触发时间泄漏警告。"}</p>
       </section>
 
@@ -135,6 +163,7 @@ export function ConfigRail(p: Props) {
                 disabled={p.busy || p.selected.length === 0 || (p.source === "file" && !p.file)}>
           {p.busy ? "实验进行中…" : "运行实验"}
         </button>
+        {p.notice && <p className="notice" role="status">{p.notice}</p>}
         {p.error && <p className="error" role="alert">{p.error}</p>}
         <p className="rail-note">本地运行 · 数据与报告都不出这台机器</p>
       </section>
