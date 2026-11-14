@@ -31,11 +31,12 @@ def test_flows_split_on_timeout():
     assert f["Flow Duration"] == 1_000_000
 
 
-def test_missing_tshark_message():
-    if pcap.tshark_available():
-        pytest.skip("本机已装 tshark")
-    with pytest.raises(pcap.PcapUnavailable):
-        pcap.read_pcap("nope.pcap")
+def test_missing_tshark_message(tmp_path, monkeypatch):
+    monkeypatch.setattr(pcap.shutil, "which", lambda _: None)
+    existing = tmp_path / "empty.pcap"
+    existing.write_bytes(b"")
+    with pytest.raises(pcap.PcapUnavailable, match="tshark"):
+        pcap.read_pcap(existing)
 
 
 def test_read_pcap_real_file(tmp_path):
