@@ -23,10 +23,14 @@ function props() {
     onSplit: vi.fn(),
     testSize: 0.3,
     onTestSize: vi.fn(),
+    validationSize: 0.2,
+    onValidationSize: vi.fn(),
     seed: 42,
     onSeed: vi.fn(),
     threshold: 0.5,
     onThreshold: vi.fn(),
+    thresholdMode: "fixed" as const,
+    onThresholdMode: vi.fn(),
     ablate: "",
     onAblate: vi.fn(),
     ablationColumns: [],
@@ -41,6 +45,7 @@ function props() {
     error: null,
     notice: null,
     onCloseMobile: vi.fn(),
+    mobileOpen: false,
   };
 }
 

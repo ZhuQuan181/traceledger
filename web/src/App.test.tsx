@@ -29,7 +29,8 @@ const payload = {
   dataset: {
     source: "flows.csv",
     rows: 120,
-    train: 84,
+    train: 60,
+    validation: 24,
     test: 36,
     hash: "deadbeef",
     split: "random",
@@ -48,6 +49,7 @@ const payload = {
     split: "temporal",
     split_effective: "random",
     test_size: 0.25,
+    validation_size: 0.2,
     seed: 7,
     threshold: 0.4,
     explain: true,
@@ -72,17 +74,24 @@ const payload = {
       auc: 0.93, pr_auc: 0.91, accuracy: 0.9, precision: 0.9,
       recall: 0.8, f1: 0.85, fpr: 0.01, support: 36, attack_support: 8,
     },
+    validation_metrics: {
+      auc: 0.92, pr_auc: 0.9, accuracy: 0.9, precision: 0.9,
+      recall: 0.8, f1: 0.85, fpr: 0.02, support: 24, attack_support: 5,
+    },
     confusion: { tn: 28, fp: 0, fn: 2, tp: 6 },
+    validation_confusion: { tn: 18, fp: 1, fn: 1, tp: 4 },
     duration_s: 0.1,
     params: {},
     split: "random",
     split_requested: "temporal",
     dataset_hash: "deadbeef",
-    n_train: 84,
+    n_train: 60,
+    n_validation: 24,
     n_test: 36,
     threshold: 0.4,
     top_flows: [],
     score_curve: [],
+    score_curve_basis: "order",
     by_label: [],
     false_positives: [],
     false_negatives: [],
@@ -91,6 +100,7 @@ const payload = {
   best_model: "mlp",
   top_flows: [],
   score_curve: [],
+  score_curve_basis: "order",
   investigation: { by_label: [], false_positives: [], false_negatives: [], source_ranking: [] },
   report_md: "# report",
   report_html: "<html></html>",
@@ -114,7 +124,7 @@ describe("App history restore", () => {
     });
     expect(screen.getByRole("spinbutton", { name: "随机种子" })).toHaveValue(7);
     expect(screen.getByRole("spinbutton", { name: "测试集比例" })).toHaveValue(0.25);
-    expect(screen.getByRole("button", { name: "运行实验" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "按新配置运行" })).toBeDisabled();
   });
 
   it("shows a failed run outside the mobile configuration drawer", async () => {
@@ -137,5 +147,36 @@ describe("App history restore", () => {
     fireEvent.click(run);
 
     await waitFor(() => expect(api.runDemo).toHaveBeenCalledTimes(1));
+  });
+
+  it("marks results stale after the configuration changes", async () => {
+    const demoPayload = {
+      ...payload,
+      experiment: {
+        ...payload.experiment,
+        source_kind: "demo",
+        source_ref: null,
+        normal: 5000,
+        attack: 500,
+        leaky: false,
+      },
+    } as Payload;
+    vi.mocked(api.runDemo).mockResolvedValue(demoPayload);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "用当前配置跑一次" }));
+    expect(await screen.findByRole("heading", { name: "01 模型对比" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("slider", { name: "判定阈值" }), {
+      target: { value: "0.6" },
+    });
+    expect(screen.getByText(/当前配置已修改/)).toBeInTheDocument();
+  });
+
+  it("exposes the mobile configuration panel as a modal dialog", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "配置" }));
+    expect(screen.getByRole("dialog", { name: "实验配置" })).toHaveAttribute("aria-modal", "true");
   });
 });

@@ -1,15 +1,19 @@
 import type { Payload } from "../types";
 import { LeakList } from "./LeakList";
 
-export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, onRerunWithout,
-                              copied, onCloseMobile }: {
+export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, onDownloadJson,
+                              onDownloadCsv, onRerunWithout,
+                              copied, onCloseMobile, mobileOpen }: {
   payload: Payload | null;
   onCopy: () => void;
   onDownloadMd: () => void;
   onDownloadHtml: () => void;
+  onDownloadJson: () => void;
+  onDownloadCsv: () => void;
   onRerunWithout: (column: string) => void;
   copied: boolean;
   onCloseMobile: () => void;
+  mobileOpen: boolean;
 }) {
   const d = payload?.dataset;
   const usedFeatures = new Set(payload?.dataset.features?.used ?? []);
@@ -19,7 +23,10 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
   );
 
   return (
-    <aside className="context">
+    <aside className="context" id="context-drawer" data-drawer="context"
+           role={mobileOpen ? "dialog" : undefined}
+           aria-modal={mobileOpen ? "true" : undefined}
+           aria-label="报告与数据审计">
       <button className="drawer-close drawer-close-right" onClick={onCloseMobile}>
         关闭报告栏
       </button>
@@ -128,6 +135,8 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
           <h2>导出报告</h2>
           <button className="wide-btn primary" onClick={onDownloadHtml}>下载 HTML 报告</button>
           <button className="wide-btn" onClick={onDownloadMd}>下载 Markdown</button>
+          <button className="wide-btn" onClick={onDownloadJson}>下载 JSON</button>
+          <button className="wide-btn" onClick={onDownloadCsv}>下载模型指标 CSV</button>
           <button className="wide-btn" onClick={onCopy}>{copied ? "已复制 Markdown" : "复制 Markdown"}</button>
         </section>
       )}

@@ -27,15 +27,18 @@ export function TopBar({ payload, busy, runs, activeRun, onOpenRun, mobilePanel,
       <div className="top-actions">
         <nav className="mobile-nav" aria-label="移动端视图">
           <button className={mobilePanel === "config" ? "on" : ""}
-                  aria-expanded={mobilePanel === "config"} onClick={() => onOpenPanel("config")}>
+                  aria-expanded={mobilePanel === "config"} aria-controls="config-drawer"
+                  onClick={() => onOpenPanel("config")}>
             配置
           </button>
           <button className={mobilePanel === "history" ? "on" : ""}
-                  aria-expanded={mobilePanel === "history"} onClick={() => onOpenPanel("history")}>
+                  aria-expanded={mobilePanel === "history"} aria-controls="history-drawer"
+                  onClick={() => onOpenPanel("history")}>
             历史
           </button>
           <button className={mobilePanel === "context" ? "on" : ""}
-                  aria-expanded={mobilePanel === "context"} onClick={() => onOpenPanel("context")}>
+                  aria-expanded={mobilePanel === "context"} aria-controls="context-drawer"
+                  onClick={() => onOpenPanel("context")}>
             报告
           </button>
         </nav>

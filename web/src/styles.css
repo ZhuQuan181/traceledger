@@ -182,13 +182,13 @@ button { -webkit-tap-highlight-color: transparent; }
 .rail h2::before { content: ""; width: 5px; height: 5px; background: var(--teal); flex: none; }
 
 .seg {
-  display: grid; grid-template-columns: 1fr 1fr;
+  display: flex;
   border: 1px solid var(--rule-strong); border-radius: 2px;
   overflow: hidden; background: rgba(248, 250, 247, .75);
   margin: 0; padding: 0; min-inline-size: 0;
 }
 .seg label {
-  position: relative; display: block; cursor: pointer;
+  position: relative; display: block; cursor: pointer; flex: 1;
 }
 .seg label + label { border-left: 1px solid var(--rule); }
 .seg input {
@@ -206,6 +206,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .seg input:focus-visible + span { outline: 2px solid var(--teal); outline-offset: -3px; }
 
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pair.single { grid-template-columns: 1fr; }
 .pair label {
   display: flex; flex-direction: column; gap: 4px;
   font-size: 12px; color: var(--ink-2); font-weight: 550;
@@ -319,6 +320,30 @@ button { -webkit-tap-highlight-color: transparent; }
   background: var(--signal-soft);
   font-size: 12px; line-height: 1.55; color: var(--ink-2);
   white-space: pre-wrap;
+}
+
+.config-stale {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin: 0 0 18px; padding: 10px 14px;
+  border: 1px solid rgba(154, 107, 22, .35); border-left: 3px solid var(--amber, #9a6b16);
+  background: #fdf8ec; color: var(--ink-2); font-size: 12.5px;
+}
+
+.connection-warning {
+  margin: 0 0 16px; padding: 10px 14px;
+  border: 1px solid rgba(134, 90, 8, .28); background: var(--amber-soft);
+  color: var(--ink-2); font-size: 12.5px;
+}
+.connection-warning code {
+  font-family: var(--mono); background: rgba(255,255,255,.55); padding: 1px 5px;
+}
+.config-stale button {
+  flex: none; border: 1px solid var(--ink); background: transparent; color: var(--ink);
+  padding: 6px 10px; font: inherit; cursor: pointer;
+}
+.config-stale button:hover { background: var(--ink); color: var(--paper); }
+@media (max-width: 640px) {
+  .config-stale { align-items: flex-start; flex-direction: column; }
 }
 .run-error button {
   flex: none; padding: 0; border: 0; background: transparent;
@@ -467,6 +492,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .dot-sep { color: var(--rule-strong); margin: 0 4px; }
 .split-meter { display: flex; width: min(100%, 460px); height: 3px; margin-top: 15px; background: var(--rule); }
 .split-train { background: var(--teal); }
+.split-validation { background: var(--amber, #9a6b16); opacity: .72; }
 .split-test { background: var(--signal); }
 
 .verdict {
@@ -530,6 +556,7 @@ button { -webkit-tap-highlight-color: transparent; }
   scrollbar-width: thin; scrollbar-color: var(--rule-strong) transparent;
 }
 .table-scroll:focus-visible { outline: 2px solid var(--teal); outline-offset: 4px; }
+.scroll-hint { display: none; }
 .table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .table thead th {
   padding: 0 9px 8px;
@@ -717,6 +744,19 @@ button { -webkit-tap-highlight-color: transparent; }
   display: flex; justify-content: space-between; gap: 12px;
   margin-top: 8px; font-size: 11px; color: var(--muted);
 }
+
+.threshold-scan {
+  margin-top: 22px; border-top: 1px solid var(--rule); padding-top: 14px;
+}
+.threshold-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  margin-bottom: 8px;
+}
+.threshold-head strong { font-size: 12px; letter-spacing: .02em; }
+.threshold-head span { color: var(--muted); font-size: 11px; }
+.threshold-table { min-width: 520px; }
+.threshold-table tr.on { background: var(--teal-soft); }
+.threshold-table tr.on th:first-child { box-shadow: inset 2px 0 0 var(--teal); }
 .legend-bar, .legend-hit {
   display: inline-block; width: 8px; height: 8px;
   margin: 0 4px 0 9px; vertical-align: -1px;
@@ -1030,7 +1070,8 @@ button { -webkit-tap-highlight-color: transparent; }
   .v-item:nth-child(3) { border-left: 0; border-top: 1px solid rgba(255, 255, 255, .13); }
   .v-item:nth-child(4) { border-top: 1px solid rgba(255, 255, 255, .13); }
   .table { font-size: 12px; }
-  .matrix { min-width: 700px; }
+  .matrix { min-width: 920px; }
+  .scroll-hint { display: block; margin: 0 0 6px; font-size: 11px; color: var(--muted); }
   .signal-plot { height: 156px; }
 }
 

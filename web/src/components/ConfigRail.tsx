@@ -9,18 +9,23 @@ type Props = {
   normal: number; attack: number;
   onNormal: (n: number) => void; onAttack: (n: number) => void;
   leaky: boolean; onLeaky: (v: boolean) => void;
-  split: "temporal" | "random";
-  onSplit: (s: "temporal" | "random") => void;
+  split: "temporal" | "random" | "group";
+  onSplit: (s: "temporal" | "random" | "group") => void;
   testSize: number; onTestSize: (v: number) => void;
+  validationSize: number; onValidationSize: (v: number) => void;
   seed: number; onSeed: (v: number) => void;
   threshold: number; onThreshold: (t: number) => void;
+  thresholdMode: "fixed" | "f1";
+  onThresholdMode: (mode: "fixed" | "f1") => void;
   ablate: string; onAblate: (col: string) => void;
   ablationColumns: string[];
   file: File | null; onFile: (f: File | null) => void;
   labelsFile: File | null; onLabelsFile: (f: File | null) => void;
   allowPickle: boolean; onAllowPickle: (v: boolean) => void;
   busy: boolean; onRun: () => void; error: string | null; notice: string | null;
+  stale?: boolean;
   onCloseMobile: () => void;
+  mobileOpen: boolean;
 };
 
 const KIND_LABEL: Record<string, string> = { supervised: "监督", unsupervised: "无监督" };
@@ -29,7 +34,10 @@ export function ConfigRail(p: Props) {
   const needsPickle = p.source === "file" && /\.(pkl|pickle|p)$/i.test(p.file?.name ?? "");
 
   return (
-    <aside className="rail">
+    <aside className="rail" id="config-drawer" data-drawer="config"
+           role={p.mobileOpen ? "dialog" : undefined}
+           aria-modal={p.mobileOpen ? "true" : undefined}
+           aria-label="实验配置">
       <button className="drawer-close drawer-close-left" onClick={p.onCloseMobile}>
         关闭配置
       </button>
@@ -103,18 +111,31 @@ export function ConfigRail(p: Props) {
                    onChange={() => p.onSplit("random")} />
             <span>随机切分</span>
           </label>
+          <label>
+            <input type="radio" name="split-mode" checked={p.split === "group"}
+                   onChange={() => p.onSplit("group")} />
+            <span>实体分组</span>
+          </label>
         </fieldset>
         <div className="pair">
           <label><span>测试集比例</span>
             <input type="number" name="test-size" min={0.05} max={0.5} step={0.05}
                    value={p.testSize} onChange={(e) => p.onTestSize(Number(e.target.value))} /></label>
+          <label><span>验证集比例</span>
+            <input type="number" name="validation-size" min={0.05} max={0.4} step={0.05}
+                   value={p.validationSize} onChange={(e) => p.onValidationSize(Number(e.target.value))} /></label>
+        </div>
+        <div className="pair single">
           <label><span>随机种子</span>
             <input type="number" name="seed" min={0} step={1}
                    value={p.seed} onChange={(e) => p.onSeed(Number(e.target.value))} /></label>
         </div>
         <p className="hint">{p.split === "temporal"
-          ? `前 ${Math.round((1 - p.testSize) * 100)}% 训练、后 ${Math.round(p.testSize * 100)}% 测试。带时间戳时这是唯一诚实的做法。`
-          : "分层随机。若数据带时间戳，会触发时间泄漏警告。"}</p>
+          ? `按时间依次划出 ${Math.round((1 - p.testSize - p.validationSize) * 100)}% 训练、${Math.round(p.validationSize * 100)}% 验证、${Math.round(p.testSize * 100)}% 测试。`
+          : p.split === "group"
+            ? "按 flow_id / 五元组 / src_ip 分组，同一实体只落在一个子集；用于新实体泛化。"
+            : "分层随机。若数据带时间戳，会触发时间泄漏警告。"}</p>
+        <p className="hint">验证集只用于选模型；测试集不参与选择，只报最终成绩。</p>
       </section>
 
       <section>
@@ -134,10 +155,19 @@ export function ConfigRail(p: Props) {
 
       <section>
         <h2>阈值与消融</h2>
+        <label className="inline-field">
+          <span>阈值策略</span>
+          <select name="threshold-mode" value={p.thresholdMode}
+                  onChange={(e) => p.onThresholdMode(e.target.value as "fixed" | "f1")}>
+            <option value="fixed">手动阈值</option>
+            <option value="f1">验证集 F1 自动</option>
+          </select>
+        </label>
         <div className="slider-row">
-          <output>阈值 {p.threshold.toFixed(2)}</output>
+          <output>{p.thresholdMode === "f1" ? "回退阈值" : "阈值"} {p.threshold.toFixed(2)}</output>
           <input type="range" name="threshold" min={0.05} max={0.95} step={0.01} value={p.threshold}
-                 aria-label="判定阈值" onChange={(e) => p.onThreshold(Number(e.target.value))} />
+                 aria-label="判定阈值" disabled={p.thresholdMode === "f1"}
+                 onChange={(e) => p.onThreshold(Number(e.target.value))} />
           <span className="range-ends" aria-hidden="true">0.05</span>
           <span className="range-ends" aria-hidden="true">0.95</span>
         </div>
@@ -156,12 +186,17 @@ export function ConfigRail(p: Props) {
           : p.ablate
             ? `会多跑一遍：去掉 ${p.ablate} 后对比 AUC。`
             : "选一列后系统会去掉它重跑，量化这一列的贡献。"}</p>
+        <p className="hint">
+          {p.thresholdMode === "f1"
+            ? "每个模型只用验证集最大化 F1 来选择阈值；测试集不参与阈值选择。"
+            : "阈值改动需重新运行才会更新混淆矩阵、F1 与误报率。"}
+        </p>
       </section>
 
       <section className="rail-run">
         <button className="run" onClick={p.onRun}
                 disabled={p.busy || p.selected.length === 0 || (p.source === "file" && !p.file)}>
-          {p.busy ? "实验进行中…" : "运行实验"}
+          {p.busy ? "实验进行中…" : p.stale ? "按新配置运行" : "运行实验"}
         </button>
         {p.notice && <p className="notice" role="status">{p.notice}</p>}
         {p.error && <p className="error" role="alert">{p.error}</p>}

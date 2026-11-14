@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchHistory, fetchModels, loadRun, runDemo, runUpload } from "./api";
-import { num, pct, secs } from "./format";
+import { num, pct } from "./format";
 import type { ModelInfo, Payload, RunRow } from "./types";
 import { TopBar } from "./components/TopBar";
 import { ConfigRail } from "./components/ConfigRail";
@@ -14,9 +14,61 @@ import { ChecklistCard } from "./components/ChecklistCard";
 import { FlowPreview } from "./components/FlowPreview";
 import { InvestigationPanel } from "./components/InvestigationPanel";
 import { HistoryList } from "./components/HistoryList";
+import { ThresholdScan } from "./components/ThresholdScan";
 
 const ALL = ["mlp", "iforest", "autoencoder"];
 type MobilePanel = "config" | "history" | "context" | null;
+
+function configSignature(config: {
+  models: string[];
+  split: string;
+  test_size: number;
+  validation_size: number;
+  seed: number;
+  threshold: number;
+  threshold_mode: "fixed" | "f1";
+  ablate: string | null;
+  source: string;
+  normal: number;
+  attack: number;
+  leaky: boolean;
+}) {
+  return JSON.stringify({
+    ...config,
+    models: [...config.models].sort(),
+    ablate: config.ablate || null,
+  });
+}
+
+function csvCell(value: unknown) {
+  const text = value == null ? "" : String(value);
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function metricsCsv(payload: Payload) {
+  const header = [
+    "model", "kind", "validation_auc", "test_auc", "test_pr_auc", "test_f1",
+    "precision", "recall", "fpr", "threshold", "duration_s", "tn", "fp", "fn", "tp",
+  ];
+  const rows = payload.results.map((row) => [
+    row.model,
+    row.kind,
+    row.validation_metrics?.auc,
+    row.metrics.auc,
+    row.metrics.pr_auc,
+    row.metrics.f1,
+    row.metrics.precision,
+    row.metrics.recall,
+    row.metrics.fpr,
+    row.threshold,
+    row.duration_s,
+    row.confusion.tn,
+    row.confusion.fp,
+    row.confusion.fn,
+    row.confusion.tp,
+  ]);
+  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+}
 
 export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -25,10 +77,12 @@ export default function App() {
   const [normal, setNormal] = useState(5000);
   const [attack, setAttack] = useState(500);
   const [leaky, setLeaky] = useState(false);
-  const [split, setSplit] = useState<"temporal" | "random">("temporal");
+  const [split, setSplit] = useState<"temporal" | "random" | "group">("temporal");
   const [testSize, setTestSize] = useState(0.3);
+  const [validationSize, setValidationSize] = useState(0.2);
   const [seed, setSeed] = useState(42);
   const [threshold, setThreshold] = useState(0.5);
+  const [thresholdMode, setThresholdMode] = useState<"fixed" | "f1">("fixed");
   const [ablate, setAblate] = useState("");
   const [ablationColumns, setAblationColumns] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
@@ -40,28 +94,73 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [historyNotice, setHistoryNotice] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
   const requestInFlight = useRef(false);
 
   useEffect(() => {
-    fetchModels().then(setModels).catch(() =>
-      setModels(ALL.map((n) => ({ name: n, kind: n === "mlp" ? "supervised" : "unsupervised" }))));
+    fetchModels().then((items) => {
+      setModels(items);
+      setConnectionError(null);
+    }).catch(() => {
+      setModels(ALL.map((n) => ({ name: n, kind: n === "mlp" ? "supervised" : "unsupervised" })));
+      setConnectionError("无法连接本地 FlowLab 后端；当前配置只是占位，运行实验仍会失败。");
+    });
     refreshHistory();
   }, []);
 
   useEffect(() => {
     if (!mobilePanel) return;
     const previous = document.body.style.overflow;
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     document.body.style.overflow = "hidden";
+    const drawer = document.querySelector<HTMLElement>(`[data-drawer="${mobilePanel}"]`);
+    const focusable = () => Array.from(
+      drawer?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), ' +
+        'textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+      ) ?? []
+    ).filter((element) => element.offsetParent !== null);
+    const frame = window.requestAnimationFrame(() => focusable()[0]?.focus());
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobilePanel(null);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMobilePanel(null);
+        return;
+      }
+      if (event.key !== "Tab" || !drawer) return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey, true);
     return () => {
+      window.cancelAnimationFrame(frame);
       document.body.style.overflow = previous;
-      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey, true);
+      if (previousFocus?.isConnected) previousFocus.focus();
     };
   }, [mobilePanel]);
+
+  useEffect(() => {
+    if (!busy) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [busy]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 900px)");
@@ -73,13 +172,57 @@ export default function App() {
   }, []);
 
   function refreshHistory() {
-    fetchHistory().then(setHistory).catch(() => setHistory([]));
+    fetchHistory().then((items) => {
+      setHistory(items);
+    }).catch(() => setHistory([]));
   }
 
   const best = useMemo(() => {
     if (!payload?.results.length) return null;
-    return payload.results.reduce((a, b) => ((b.metrics.auc ?? 0) > (a.metrics.auc ?? 0) ? b : a));
+    return payload.results.reduce((a, b) =>
+      ((b.validation_metrics?.auc ?? b.metrics.auc ?? 0)
+        > (a.validation_metrics?.auc ?? a.metrics.auc ?? 0) ? b : a));
   }, [payload]);
+
+  const currentConfig = useMemo(() => configSignature({
+    models: selected,
+    split,
+    test_size: testSize,
+    validation_size: validationSize,
+    seed,
+    threshold,
+    threshold_mode: thresholdMode,
+    ablate: ablate || null,
+    source: source === "demo"
+      ? `demo:${normal}:${attack}:${leaky}`
+      : `file:${file?.name ?? ""}`,
+    normal,
+    attack,
+    leaky,
+  }), [selected, split, testSize, validationSize, seed, threshold, thresholdMode, ablate, source, normal, attack, leaky, file]);
+
+  const resultConfig = useMemo(() => {
+    const exp = payload?.experiment;
+    if (!exp) return null;
+    return configSignature({
+      models: exp.models,
+      split: exp.split,
+      test_size: exp.test_size ?? 0.3,
+      validation_size: exp.validation_size ?? 0.2,
+      seed: exp.seed ?? 42,
+      threshold: exp.threshold ?? 0.5,
+      threshold_mode: exp.threshold_mode ?? "fixed",
+      ablate: exp.ablate ?? null,
+      source: exp.source_kind === "demo"
+        ? `demo:${exp.normal}:${exp.attack}:${Boolean(exp.leaky)}`
+        : `file:${(exp.source_ref ?? "").split(/[\\/]/).pop() ?? ""}`,
+      normal: exp.normal,
+      attack: exp.attack,
+      leaky: Boolean(exp.leaky),
+    });
+  }, [payload]);
+
+  const stale = Boolean(payload && resultConfig && currentConfig !== resultConfig);
 
   function restoreConfig(data: Payload, restoreSource: boolean) {
     const exp = data.experiment;
@@ -92,8 +235,10 @@ export default function App() {
     setSelected(exp.models);
     setSplit(exp.split);
     setTestSize(exp.test_size ?? 0.3);
+    setValidationSize(exp.validation_size ?? 0.2);
     setSeed(exp.seed ?? 42);
     setThreshold(exp.threshold ?? 0.5);
+    setThresholdMode(exp.threshold_mode ?? "fixed");
     setAblate(exp.ablate ?? "");
     setNormal(exp.normal ?? 5000);
     setAttack(exp.attack ?? 500);
@@ -157,6 +302,10 @@ export default function App() {
       setError("测试集比例需在 0.05–0.5 之间。");
       return;
     }
+    if (validationSize < 0.05 || validationSize > 0.4 || testSize + validationSize > 0.8) {
+      setError("验证集需在 0.05–0.4 之间，且验证集与测试集合计不超过 80%。");
+      return;
+    }
     requestInFlight.current = true;
     setBusy(true);
     setError(null);
@@ -164,13 +313,15 @@ export default function App() {
     try {
       const ablateValue = override?.ablate ?? ablate;
       const params = {
-        seed, split, test_size: testSize, models: selected, threshold,
+        seed, split, test_size: testSize, validation_size: validationSize, models: selected,
+        threshold, threshold_mode: thresholdMode,
         ablate: ablateValue || null,
       };
       const data = source === "demo"
         ? await runDemo({ ...params, normal, attack, leaky })
         : await runUpload(file!, params, labelsFile, allowPickle);
       applyPayload(data, ablateValue);
+      setConnectionError(null);
       refreshHistory();
       revealResults();
     } catch (e) {
@@ -281,7 +432,8 @@ export default function App() {
       )}
 
       {mobilePanel === "history" && (
-        <aside className="mobile-history-drawer" aria-label="最近实验">
+        <aside className="mobile-history-drawer" id="history-drawer" data-drawer="history"
+               role="dialog" aria-modal="true" aria-label="最近实验">
           <header>
             <div>
               <span>LOCAL HISTORY</span>
@@ -312,17 +464,25 @@ export default function App() {
           leaky={leaky} onLeaky={setLeaky}
           split={split} onSplit={setSplit}
           testSize={testSize} onTestSize={setTestSize}
+          validationSize={validationSize} onValidationSize={setValidationSize}
           seed={seed} onSeed={setSeed}
           threshold={threshold} onThreshold={setThreshold}
+          thresholdMode={thresholdMode} onThresholdMode={setThresholdMode}
           ablate={ablate} onAblate={setAblate} ablationColumns={ablationColumns}
           file={file} onFile={selectFile}
           labelsFile={labelsFile} onLabelsFile={setLabelsFile}
           allowPickle={allowPickle} onAllowPickle={setAllowPickle}
-          busy={busy} onRun={() => run()} error={error} notice={historyNotice}
+          busy={busy} onRun={() => run()} error={error} notice={historyNotice} stale={stale}
           onCloseMobile={() => setMobilePanel(null)}
+          mobileOpen={mobilePanel === "config"}
         />
 
         <main className="canvas" id="main">
+          {connectionError && (
+            <div className="connection-warning" role="status">
+              {connectionError} 请在本机运行 <code>uv run flowlab serve</code>。
+            </div>
+          )}
           {error && (
             <div className="run-error" role="alert">
               <span>{error}</span>
@@ -368,6 +528,12 @@ export default function App() {
 
           {payload && d && best && (
             <>
+              {stale && (
+                <div className="config-stale" role="status">
+                  <span>当前配置已修改；下方仍是上一次运行的结果。</span>
+                  <button type="button" onClick={() => run()} disabled={busy}>按当前配置运行</button>
+                </div>
+              )}
               <header className="head" id="result-start">
                 <div className="head-kicker">
                   RUN {payload.run_id ?? "—"} <span className="dot-sep">·</span> {d.format?.format ?? "data"}
@@ -375,18 +541,22 @@ export default function App() {
                 <h1>{d.source.replace(/（.*?）/g, "")}</h1>
                 <p className="head-sub">
                   {d.rows.toLocaleString()} 条流 <span className="dot-sep">/</span> 训练 {d.train.toLocaleString()}{" "}
-                  · 测试 {d.test.toLocaleString()} <span className="dot-sep">/</span>{" "}
+                  · 验证 {d.validation.toLocaleString()} <span className="dot-sep">/</span> 测试{" "}
+                  {d.test.toLocaleString()} <span className="dot-sep">/</span>{" "}
                   {d.split === "temporal" ? "时间切分"
+                    : d.split === "group" ? "实体分组切分"
                     : d.split_requested === "temporal" ? "随机切分（时间切分已退化）" : "随机切分"}
+                  {d.generalization ? ` · ${d.generalization}` : ""}
                 </p>
                 <div className="split-meter" aria-hidden="true">
                   <span className="split-train" style={{ width: `${Math.round((d.train / d.rows) * 100)}%` }} />
+                  <span className="split-validation" style={{ width: `${Math.round((d.validation / d.rows) * 100)}%` }} />
                   <span className="split-test" style={{ width: `${Math.round((d.test / d.rows) * 100)}%` }} />
                 </div>
 
                 <div className="verdict">
                   <div className="v-item">
-                    <span className="v-k">最佳模型</span>
+                    <span className="v-k">验证集最佳</span>
                     <span className="v-v mono">{best.model}</span>
                   </div>
                   <div className="v-item">
@@ -428,7 +598,7 @@ export default function App() {
               <section className="block">
                 <header className="block-head">
                   <h2><span className="idx">01</span>模型对比</h2>
-                  <span className="aside">按 AUC 排序 · 同一份特征矩阵</span>
+                  <span className="aside">验证集选模型 · 测试集报成绩</span>
                 </header>
                 <MetricMatrix results={payload.results} bestModel={payload.best_model}
                               suspicious={suspicious} badge={bestBadge} />
@@ -436,10 +606,19 @@ export default function App() {
 
               <section className="block">
                 <header className="block-head">
-                  <h2><span className="idx">02</span>分数峰值随时间</h2>
-                  <span className="aside">柱高＝窗口最高分 · 红条＝窗口内含超阈值流</span>
+                  <h2><span className="idx">02</span>
+                    {payload.score_curve_basis === "time" ? "分数峰值随时间" : "分数峰值（按测试样本顺序）"}
+                  </h2>
+                  <span className="aside">
+                    {payload.score_curve_basis === "time" ? "测试集已按时间排序" : "随机/分组切分不代表时间顺序"}
+                    {" · "}柱高＝窗口最高分 · 红条＝窗口内含超阈值流
+                  </span>
                 </header>
                 <SignalStrip curve={best.score_curve ?? payload.score_curve ?? []} threshold={d.threshold} />
+                <ThresholdScan
+                  rows={best.threshold_scan ?? payload.threshold_scan ?? []}
+                  active={best.threshold ?? d.threshold}
+                />
               </section>
 
               {payload.ablation && (
@@ -483,9 +662,14 @@ export default function App() {
           onCopy={copy}
           onDownloadMd={() => payload && save(payload.report_md, "text/markdown", "md")}
           onDownloadHtml={() => payload && save(payload.report_html, "text/html", "html")}
+          onDownloadJson={() => payload && save(
+            JSON.stringify(payload, null, 2), "application/json", "json"
+          )}
+          onDownloadCsv={() => payload && save(metricsCsv(payload), "text/csv", "csv")}
           onRerunWithout={(col) => { setAblate(col); run({ ablate: col }); }}
           copied={copied}
           onCloseMobile={() => setMobilePanel(null)}
+          mobileOpen={mobilePanel === "context"}
         />
       </div>
     </div>

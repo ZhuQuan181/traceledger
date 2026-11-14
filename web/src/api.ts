@@ -41,10 +41,12 @@ export async function loadRun(id: string): Promise<Payload> {
 
 export type RunParams = {
   seed: number;
-  split: "temporal" | "random";
+  split: "temporal" | "random" | "group";
   test_size: number;
+  validation_size: number;
   models: string[];
   threshold: number;
+  threshold_mode: "fixed" | "f1";
   ablate?: string | null;
 };
 
@@ -70,8 +72,10 @@ export async function runUpload(
   if (labels) form.append("labels", labels);
   form.append("split", p.split);
   form.append("test_size", String(p.test_size));
+  form.append("validation_size", String(p.validation_size));
   form.append("models", p.models.join(","));
   form.append("threshold", String(p.threshold));
+  form.append("threshold_mode", p.threshold_mode);
   form.append("seed", String(p.seed));
   if (p.ablate) form.append("ablate", p.ablate);
   form.append("allow_pickle", String(allowPickle));
