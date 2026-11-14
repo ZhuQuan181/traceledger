@@ -25,6 +25,9 @@ def _meta_table(v: ReportView) -> str:
         split = "时间切分"
     elif split == "random":
         split = "分层随机切分"
+    environment = " · ".join(
+        f"{key} {value}" for key, value in v.environment.items() if value is not None
+    )
     rows = [
         ("数据来源", f"{v.source}（{v.fmt}）"),
         ("样本量", f"{v.rows}（训练 {v.train} / 验证 {v.validation} / 测试 {v.test}）"),
@@ -34,14 +37,13 @@ def _meta_table(v: ReportView) -> str:
         ),
         ("数据指纹", f"`{v.hash}`"),
         ("实验指纹", f"`{v.experiment_fingerprint}`"),
+        ("运行环境", environment or "—"),
         ("切分方式", split),
         ("泛化场景", v.generalization),
         ("随机种子", str(v.seed)),
         (
             "判定阈值",
-            f"{v.threshold}（"
-            + ("验证集 F1 自动选择" if v.threshold_source == "validation_f1" else "人工指定")
-            + "）",
+            f"{v.threshold}（{_threshold_source(v)}）",
         ),
         ("模型选择", "验证集 AUC（测试集只做最终报告）"),
         (
@@ -55,6 +57,17 @@ def _meta_table(v: ReportView) -> str:
     return "| 项 | 值 |\n|---|---|\n" + "\n".join(
         f"| {_cell(k)} | {_cell(val)} |" for k, val in rows
     )
+
+
+def _threshold_source(v: ReportView) -> str:
+    if v.threshold_source == "validation_f1":
+        return "验证集 F1 自动选择"
+    if v.threshold_source == "validation_fpr":
+        target = (
+            f"≤{v.threshold_target_fpr:.2%}" if v.threshold_target_fpr is not None else "目标值"
+        )
+        return f"验证集目标误报率自动选择（{target}）"
+    return "人工指定"
 
 
 def _classes_line(v: ReportView) -> str:
@@ -71,6 +84,52 @@ def _features_line(v: ReportView) -> str:
     return (
         f"\n**参与训练的特征**：{len(v.features)} 列（编码后 {v.encoded_features} 维）\n\n{shown}\n"
     )
+
+
+def _quality_block(v: ReportView) -> str:
+    quality = v.quality
+    if not quality:
+        return ""
+    rare = quality.get("rare_classes") or []
+    examples = quality.get("conflict_examples") or []
+    rows = [
+        ("缺失标签", f"{int(quality.get('missing_labels') or 0):,} 条"),
+        (
+            "完全重复行",
+            f"{int(quality.get('duplicate_rows') or 0):,} 行"
+            f"（{float(quality.get('duplicate_rate') or 0):.2%}）",
+        ),
+        (
+            "同一实体多标签",
+            f"{int(quality.get('conflict_groups') or 0):,} 组"
+            f" / {int(quality.get('conflict_rows') or 0):,} 行"
+            if quality.get("conflict_key")
+            else "无可用实体键",
+        ),
+        (
+            "稀有类别",
+            " · ".join(f"{row['label']} {row['count']}" for row in rare)
+            if rare
+            else f"无（阈值 <{quality.get('rare_threshold', 20)}）",
+        ),
+    ]
+    out = [
+        "### 标签质量",
+        "",
+        "| 检查 | 结果 |",
+        "|---|---|",
+        *[f"| {_cell(name)} | {_cell(value)} |" for name, value in rows],
+    ]
+    if examples:
+        out += ["", "冲突示例："]
+        out += [
+            f"- `{_cell(row['entity'])}`：{'、'.join(_cell(v) for v in row['labels'])}"
+            for row in examples
+        ]
+    if rare:
+        out += ["", "> 稀有类别可能无法支撑稳定结论，建议合并、补样或单独报告。"]
+    out.append("")
+    return "\n".join(out)
 
 
 def _warn_table(warns: list[dict]) -> str:
@@ -113,6 +172,44 @@ def _threshold_table(v: ReportView) -> str:
         + "\n\n> 该扫描只用于展示部署权衡，不能拿测试集挑阈值；"
         "自动阈值只使用验证集。\n"
     )
+
+
+def _sample_rows(rows: list[dict], limit: int = 8) -> list[dict]:
+    """曲线和分箱表只保留可读的抽样点，完整数据仍留在 JSON 报告里。"""
+    if len(rows) <= limit:
+        return rows
+    indices = sorted({round(index * (len(rows) - 1) / (limit - 1)) for index in range(limit)})
+    return [rows[index] for index in indices]
+
+
+def _curves_block(v: ReportView) -> str:
+    if not (v.roc_curve or v.pr_curve or v.calibration):
+        return ""
+    out = [f"### 排序与校准（{v.best_model}）", ""]
+    if v.brier_score is not None:
+        out += [f"**Brier score**：`{v.brier_score:.4f}`（越低越好，仅监督模型）", ""]
+    if v.calibration_note:
+        out += [f"> {v.calibration_note}", ""]
+    if v.roc_curve:
+        out += ["| ROC · FPR | TPR | 阈值 |", "|---|---|---|"]
+        for row in _sample_rows(v.roc_curve):
+            threshold = "—" if row.get("threshold") is None else f"{row['threshold']:.4f}"
+            out.append(f"| {row['fpr']:.4f} | {row['tpr']:.4f} | {threshold} |")
+        out.append("")
+    if v.pr_curve:
+        out += ["| PR · 召回率 | 精确率 | 阈值 |", "|---|---|---|"]
+        for row in _sample_rows(v.pr_curve):
+            threshold = "—" if row.get("threshold") is None else f"{row['threshold']:.4f}"
+            out.append(f"| {row['recall']:.4f} | {row['precision']:.4f} | {threshold} |")
+        out.append("")
+    if v.calibration:
+        out += ["| 校准 · 平均预测概率 | 实际攻击比例 |", "|---|---|"]
+        out += [
+            f"| {row['mean_predicted']:.4f} | {row['fraction_positive']:.4f} |"
+            for row in _sample_rows(v.calibration)
+        ]
+        out.append("")
+    return "\n".join(out)
 
 
 def _ablation_block(v: ReportView, section: int) -> str:
@@ -268,6 +365,7 @@ def render_report(
         _meta_table(v),
         "",
         _classes_line(v),
+        _quality_block(v),
         _features_line(v),
         "## 2. 数据泄漏检查",
         "",
@@ -279,6 +377,7 @@ def render_report(
         _model_table(v),
         "",
         _threshold_table(v),
+        _curves_block(v),
         "",
         "## 4. 混淆矩阵",
         "",
@@ -301,7 +400,13 @@ def render_report(
         next_section += 1
     command = v.reproduction_command or (
         f"uv run flowlab demo --split {v.split_requested} --seed {v.seed} "
-        f"--threshold {v.threshold} --models {','.join(m.model for m in v.models)}"
+        f"--threshold {v.threshold} --threshold-mode {v.threshold_mode} "
+        + (
+            f"--target-fpr {v.threshold_target_fpr} "
+            if v.threshold_mode == "fpr" and v.threshold_target_fpr is not None
+            else ""
+        )
+        + f"--models {','.join(m.model for m in v.models)}"
     )
     source_note = (
         "上传文件的原路径不会写入历史；复现前请重新选择同名数据与标签文件。"

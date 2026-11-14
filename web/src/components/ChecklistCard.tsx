@@ -6,11 +6,11 @@ export function ChecklistCard({ items }: { items: ChecklistItem[] }) {
   const allOk = passed === items.length;
 
   return (
-    <section className={`checklist-card ${allOk ? "done" : ""}`}>
-      <div className="cc-head">
-        <h2>自查清单</h2>
+    <details className={`checklist-card ${allOk ? "done" : ""}`}>
+      <summary className="cc-head">
+        <span className="cc-title">自查清单</span>
         <span className="cc-count">{passed}/{items.length}</span>
-      </div>
+      </summary>
       <ul className="cc-list">
         {items.map((i) => (
           <li key={i.item} className={i.ok ? "ok" : "todo"}>
@@ -23,6 +23,6 @@ export function ChecklistCard({ items }: { items: ChecklistItem[] }) {
       <p className="cc-foot">
         {allOk ? "全部通过，可以直接进附录。" : "未勾选的项补完再投稿——这些是审稿人最容易问到的。"}
       </p>
-    </section>
+    </details>
   );
 }

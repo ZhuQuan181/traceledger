@@ -25,6 +25,7 @@ class ExperimentSpec:
     seed: int = 42
     threshold: float = 0.5
     threshold_mode: str = "fixed"
+    target_fpr: float = 0.01
     explain: bool = True
     ablate: str | None = None
     source_kind: str = "demo"
@@ -52,9 +53,10 @@ def reproduction_command(spec: ExperimentSpec, effective_split: str) -> str:
         str(spec.threshold),
         "--threshold-mode",
         spec.threshold_mode,
-        "--models",
-        ",".join(spec.models),
     ]
+    if spec.threshold_mode == "fpr":
+        common += ["--target-fpr", str(spec.target_fpr)]
+    common += ["--models", ",".join(spec.models)]
     if spec.ablate:
         common += ["--ablate", spec.ablate]
     if spec.source_kind == "demo":
@@ -90,8 +92,10 @@ def validate_spec(spec: ExperimentSpec) -> None:
         raise ValueError(f"未知模型 {unknown}，可用模型: {available()}")
     if not 0 <= spec.threshold <= 1:
         raise ValueError("threshold 应在 0~1 之间")
-    if spec.threshold_mode not in {"fixed", "f1"}:
-        raise ValueError("threshold_mode 只能是 fixed 或 f1")
+    if spec.threshold_mode not in {"fixed", "f1", "fpr"}:
+        raise ValueError("threshold_mode 只能是 fixed、f1 或 fpr")
+    if not 0 < spec.target_fpr < 1:
+        raise ValueError("target_fpr 应在 0~1 之间")
     if not 0.05 <= spec.test_size <= 0.5:
         raise ValueError("test_size 应在 0.05~0.5 之间")
     if not 0.05 <= spec.validation_size <= 0.4:
@@ -115,6 +119,7 @@ def execute(df: pd.DataFrame, meta: dict, source: str, spec: ExperimentSpec) -> 
         seed=spec.seed,
         threshold=spec.threshold,
         threshold_mode=spec.threshold_mode,
+        target_fpr=spec.target_fpr,
         test_size=spec.test_size,
         validation_size=spec.validation_size,
         explain=spec.explain,
@@ -134,6 +139,7 @@ def execute(df: pd.DataFrame, meta: dict, source: str, spec: ExperimentSpec) -> 
             seed=spec.seed,
             threshold=spec.threshold,
             threshold_mode=spec.threshold_mode,
+            target_fpr=spec.target_fpr,
             test_size=spec.test_size,
             validation_size=spec.validation_size,
         ).to_dict()

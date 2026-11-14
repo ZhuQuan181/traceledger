@@ -63,6 +63,7 @@ class ReportView:
     threshold: str
     threshold_mode: str
     threshold_source: str
+    threshold_target_fpr: float | None
     labels_mode: str
     labels_labelled: int
     labels_total: int
@@ -80,16 +81,23 @@ class ReportView:
     curve: list[dict]
     curve_basis: str
     threshold_scan: list[dict]
+    roc_curve: list[dict]
+    pr_curve: list[dict]
+    calibration: list[dict]
+    brier_score: float | None
+    calibration_note: str
     ablation: dict | None
     small_test: bool
     leak_count: int
     classes: list[dict] = field(default_factory=list)
+    quality: dict = field(default_factory=dict)
     features: list[str] = field(default_factory=list)
     encoded_features: int = 0
     verdict: dict = field(default_factory=dict)
     checklist: list[dict] = field(default_factory=list)
     generated_at: str = ""
     experiment_fingerprint: str = ""
+    environment: dict = field(default_factory=dict)
     reproduction_command: str = ""
     source_kind: str = "demo"
     by_label: list[dict] = field(default_factory=list)
@@ -180,6 +188,7 @@ def build_view(
         threshold=f"{best.threshold:.2f}" if best else "0.50",
         threshold_mode=str(exp.get("threshold_mode") or "fixed"),
         threshold_source=(best.threshold_source if best else "fixed"),
+        threshold_target_fpr=(best.threshold_target_fpr if best else None),
         labels_mode=lab.get("mode", "embedded"),
         labels_labelled=int(lab.get("labelled", 0) or 0),
         labels_total=int(lab.get("total", 0) or 0),
@@ -197,16 +206,23 @@ def build_view(
         curve=(best.score_curve if best else []),
         curve_basis=(best.score_curve_basis if best else "order"),
         threshold_scan=(best.threshold_scan if best else []),
+        roc_curve=(best.roc_curve if best else []),
+        pr_curve=(best.pr_curve if best else []),
+        calibration=(best.calibration if best else []),
+        brier_score=(best.brier_score if best else None),
+        calibration_note=(best.calibration_note if best else ""),
         ablation=ablation,
         small_test=bool(r0 and r0.n_test < 50),
         leak_count=len(warns),
         classes=meta.get("classes") or [],
+        quality=meta.get("quality") or {},
         features=(meta.get("features") or {}).get("used") or [],
         encoded_features=(meta.get("features") or {}).get("encoded") or 0,
         verdict=meta.get("verdict") or {},
         checklist=meta.get("checklist") or [],
         generated_at=str(meta.get("generated_at") or ""),
         experiment_fingerprint=str(meta.get("experiment_fingerprint") or ""),
+        environment=meta.get("environment") or {},
         reproduction_command=str(exp.get("command") or ""),
         source_kind=str(exp.get("source_kind") or "demo"),
         by_label=(best.by_label if best else []) or investigation.get("by_label") or [],

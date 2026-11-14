@@ -59,6 +59,8 @@
 | `report/` | Markdown / 单文件 HTML | 实验逻辑 |
 | `payload.py` | 统一输出结构（CLI/API/存储共用） | 计算 |
 | `store.py` | SQLite 历史 | 报告内容 |
+| `compare.py` | 跨实验可比性审计与差值计算 | 模型训练 |
+| `quality.py` | 标签覆盖、重复、冲突与稀有类别诊断 | 修复原始数据 |
 | `service.py` | 编排：实验 + 消融 + payload | 任何具体算法 |
 
 ## 三、三个契约
@@ -89,11 +91,13 @@ false_negatives / source_ranking`。
 
 ```json
 {
-  "dataset": {"source","rows","train","test","hash","split","split_requested",
-               "threshold","seed","attack_train","attack_test","labels","engineering",
-               "format","classes","features","experiment_fingerprint"},
+  "dataset": {"source","rows","train","validation","test","hash","split",
+               "threshold","threshold_mode","seed","attack_train","attack_validation",
+               "attack_test","labels","engineering","format","classes","quality",
+               "features","experiment_fingerprint"},
   "experiment": {"models","split","split_effective","test_size","seed","threshold",
                  "source_kind","source","command"},
+  "environment": {"flowlab","python","pandas","numpy","scikit_learn"},
   "generated_at": "...", "experiment_fingerprint": "...",
   "warnings": [{"rule","columns","severity","message","suggestion"}],
   "results": [EvalResult...],
@@ -146,6 +150,8 @@ false_negatives / source_ranking`。
     （`test_missing_labels_are_rejected_instead_of_treated_as_attacks`）
 14. **消融列必须真实参与训练**：元数据列和不存在列返回可读错误
     （`test_ablation_must_target_a_feature_used_by_the_model`）
+15. **伪造 Host 不能绕过本地写保护**：所有 API 请求先校验 Host 白名单
+    （`test_forged_host_is_rejected`）
 
 ## 六、这次重构做了什么（v0.4）
 
@@ -187,13 +193,26 @@ false_negatives / source_ranking`。
 7. ✅ tag 发布流水线生成 wheel、sdist、依赖清单、SHA256 和 GitHub Release。
 8. ✅ CLI 默认拒绝非回环绑定；远程暴露必须显式 `--allow-remote`，但仍需外部鉴权。
 
-## 十、剩余债务
+## 十、v0.8 可比性与数据质量
 
-1. `store.py` 存整份 payload，历史库会随报告变长而变大；可只存结果 + 报告按需重建。
-2. 泄漏规则是硬编码顺序，规则多起来应改成注册表 + 可开关。
-3. 前端 `styles.css` 仍是单文件（约 38 KB），组件多起来需要按层拆成 `tokens/layout/components`。
-4. 长任务没有进度事件和取消机制；历史库仍缺检索、标签和保留策略 UI。
-5. 远程模式没有内置鉴权；`--allow-remote` 只表示用户确认风险，不提供访问控制。
-6. 跨实验对比、概率校准、置信区间和 PR/ROC 曲线仍是下一阶段工作。
+1. ✅ 跨实验对比会先核对数据指纹、特征矩阵、切分、验证集规模和阈值策略，再计算差值。
+2. ✅ 历史工作台支持搜索、筛选、分页、备注、状态、删除和按保留数量清理。
+3. ✅ 标签质量与模型性能分开报告：覆盖、重复、实体多标签冲突、稀有类别与少数测试类。
+4. ✅ 诊断曲线补齐 ROC/PR、校准、Brier score、目标 FPR 阈值和阈值来源。
+5. ✅ 报告记录运行环境与模型参数，并把环境纳入实验指纹。
+6. ✅ 本地 API 使用 Host 白名单与安全响应头；伪造 Host 无法绕过同源写保护。
+7. ✅ 320px 窄屏顶栏与分数图不再产生页面级横向溢出；自查清单默认折叠。
+
+## 十一、剩余债务
+
+1. **长任务体验**：仍没有 job id、阶段进度、取消与排队；大文件运行期间刷新页面会丢失前端状态。
+2. **无标签 Web 工作流**：CLI 已有 `flowlab score`，但 Web 仍要求标签并进入完整评估流程。
+3. **运行前数据预检**：Web 尚未在训练前展示列映射、空值/inf、时间戳可解析性和切分后类别数量。
+4. **历史存储体积**：`store.py` 存整份 payload，报告越长数据库越大；后续应拆出报告正文或做压缩/清理策略。
+5. **统计可信度**：尚未提供 bootstrap 置信区间、模型差值区间或时间块交叉验证。
+6. **特征贡献**：尚未接入 permutation importance / SHAP，报告无法给出原始列级贡献。
+7. **前端结构**：`styles.css` 仍是单文件，组件继续增加后应拆分为 tokens/layout/components。
+8. **远程模式**：没有内置鉴权；`--allow-remote` 只表示用户确认风险，不提供访问控制。
+9. **基准复现**：公开数据集与 pcap 端到端仍未进入固定 CI；`tshark` 路径目前以跳过为主。
 
 下一步的优先级和验收标准见 [`OPTIMIZATION-ROADMAP.md`](OPTIMIZATION-ROADMAP.md)。

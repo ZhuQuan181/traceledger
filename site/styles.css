@@ -124,6 +124,7 @@ dt,
 .topbar nav {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: clamp(16px, 2.5vw, 30px);
   color: var(--ink-2);
   font-size: 13px;
@@ -132,6 +133,7 @@ dt,
 .topbar nav a {
   padding: 5px 0;
   border-bottom: 1px solid transparent;
+  white-space: nowrap;
 }
 
 .topbar nav a:hover {
@@ -656,9 +658,9 @@ footer {
 
   .topbar nav {
     width: 100%;
-    justify-content: space-between;
-    gap: 10px;
-    font-size: 12px;
+    justify-content: flex-start;
+    gap: 7px 16px;
+    font-size: 12.5px;
   }
 
   main,
@@ -706,6 +708,25 @@ footer {
   footer {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+
+@media (max-width: 380px) {
+  .topbar {
+    padding-inline: 14px;
+  }
+
+  .hero h1 {
+    font-size: clamp(2.9rem, 14.5vw, 3.6rem);
+  }
+
+  .topbar nav {
+    gap: 6px 12px;
+    font-size: 11.5px;
+  }
+
+  .topbar nav a.lang {
+    padding-inline: 7px;
   }
 }
 

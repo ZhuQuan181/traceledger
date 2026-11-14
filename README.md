@@ -11,14 +11,14 @@
 > **把网络流量异常检测的研究模型，变成能跑、能复现、能解释的系统。**
 
 - 创建：2026-11-11
-- 当前版本：**v0.7.0**（2026-11-15：验证集选模、实体切分、阈值扫描、历史迁移、可访问性与发布自动化）
-- 测试：**141 个后端测试 + 14 个前端测试**；pcap 测试需要本机 `tshark`
+- 当前版本：**v0.8.0**（2026-11-15：跨实验对比、标签质量诊断、历史检索与容量管理、ROC/PR/校准曲线、运行环境清单）
+- 测试：**168 个后端测试 + 26 个前端测试**；pcap 测试需要本机 `tshark`
 - 文档语言：中文为主，提供英文 README；代码与接口用英文
 - 在线项目页：https://zhuquan181.github.io/traceledger/
-- 示例报告：https://zhuquan181.github.io/traceledger/demo-report.html
+- 示例报告（合成数据）：https://zhuquan181.github.io/traceledger/demo-report.html
 - 其他语言：[English](README.en.md)
 
-[![FlowLab 工作台截图](screens/v10-workspace.png)](https://zhuquan181.github.io/traceledger/)
+[![FlowLab 工作台截图](screens/v11-workspace.png)](https://zhuquan181.github.io/traceledger/)
 
 ## 快速开始
 
@@ -88,17 +88,17 @@ Docker 镜像同时包含 Python API 和构建后的 Web UI；容器默认只映
 - **前端**：组件测试、全量依赖审计、生产构建
 - **打包**：同时验证“没有前端产物的源码 checkout 可安装”和“发布 wheel 内置 Web UI”
 - **容器**：每次 CI 都执行 Docker build
-- **Pages**：部署中英文项目页和一份真实生成的静态报告
+- **Pages**：部署中英文项目页和一份由合成数据生成的静态示例报告
 - **本地工作台**：Pages 只承载介绍页；完整 Web 工作台需要本机 Python 后端（`flowlab serve`）
 
-## v0.7 的重点
+## v0.8 的重点
 
-- **方法学**：训练 / 验证 / 测试三段式；验证集选择模型与自动阈值，测试集只在最后报告一次。
-- **切分审计**：检查跨集重复行与实体重叠；新增按 `flow_id` / 五元组 / 源 IP 分组切分。
-- **阈值**：支持验证集 F1 自动选阈值，并展示测试集阈值扫描与 F1/FPR/召回权衡。
-- **界面**：配置修改后明确提示结果过期；报告支持 Markdown/HTML/JSON/CSV；移动抽屉补焦点陷阱与 `aria-modal`。
-- **历史与发布**：SQLite schema v2 原位迁移，删除单条历史；tag 自动构建 wheel/sdist、校验和与 GitHub Release。
-- **打包修复**：源码 checkout 在没有 `web/dist` 时也能 `uv sync`、构建和安装。
+- **跨实验对比**：选择 2–4 次实验，先核对数据指纹、特征矩阵、切分、验证集规模和阈值策略，再比较验证/测试指标与差值；可导出 Markdown。
+- **历史工作流**：按来源、模型、状态和备注检索，分页浏览，添加“基准/失败/归档”状态与备注，单条删除，按保留数量清理旧记录。
+- **数据质量**：在报告中单独列出标签覆盖、重复行、五元组多标签冲突和极小类别，避免把数据问题误读成模型问题。
+- **诊断能力**：新增目标 FPR 阈值、ROC/PR 曲线、校准曲线、Brier score 和模型参数表。
+- **可复现环境**：报告记录 FlowLab、Python、pandas、NumPy、scikit-learn 版本，并把环境纳入实验指纹。
+- **界面与安全**：历史与对比弹窗支持窄屏；自查清单默认折叠；本机 API 增加 Host 白名单与安全响应头。
 
 更完整的后续优先级和验收标准见 [优化路线图](docs/OPTIMIZATION-ROADMAP.md)。
 
@@ -109,8 +109,8 @@ CSV / pcap
    ↓ ingest        列名标准化、分隔符/编码嗅探、五元组聚合
    ↓ features      泄漏检测 → 训练/测试分离的预处理
    ↓ models        registry 插件（mlp / iforest / autoencoder / 你的）
-   ↓ eval          时间/随机/实体切分 → 验证集选模 → 测试集 AUC·PR-AUC·F1·FPR·调查线索
-   ↓ report/api    报告含：指纹、种子、特征清单、类别分布、混淆矩阵、复现命令
+   ↓ eval          时间/随机/实体切分 → 验证集选模 → 测试集指标·诊断曲线·标签质量·调查线索
+   ↓ report/api    报告含：指纹、运行环境、种子、特征清单、类别分布、混淆矩阵、复现命令
   ↓ store         SQLite 实验历史（本地，不上传）
 ```
 

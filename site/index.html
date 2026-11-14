@@ -55,14 +55,14 @@
           最后把结论、消融和可疑流写成可离线归档的报告。
         </p>
         <div class="actions">
-          <a class="button primary" href="./demo-report.html">看一份真实报告</a>
+          <a class="button primary" href="./demo-report.html">看一份示例报告</a>
           <a class="button" href="#start">在本地启动</a>
         </div>
         <dl class="run-record" aria-label="项目状态">
           <div><dt>输入</dt><dd>14 种格式</dd></div>
           <div><dt>审计</dt><dd>4 类泄漏</dd></div>
           <div><dt>模型</dt><dd>3 个基线</dd></div>
-          <div><dt>测试</dt><dd>141 + 14</dd></div>
+          <div><dt>测试</dt><dd>168 + 26</dd></div>
         </dl>
       </div>
 
@@ -73,7 +73,7 @@
         </div>
         <img src="./assets/workspace.png" width="1440" height="900"
              alt="FlowLab 工作台截图：左侧配置实验，中间展示结论、指标与消融，右侧给出泄漏和下一步建议。">
-        <figcaption>v0.7 工作台：配置、证据和下一步在同一屏内。</figcaption>
+        <figcaption>v0.8 工作台：配置、证据和下一步在同一屏内。</figcaption>
       </figure>
     </section>
 
@@ -113,11 +113,11 @@
           </div>
           <div>
             <dt>证据</dt>
-            <dd>验证 AUC、测试 AUC、PR-AUC、F1、误报率、混淆矩阵、分数曲线、阈值扫描、类别分布和特征清单。</dd>
+            <dd>验证/测试 AUC、PR-AUC、F1、误报率、混淆矩阵、分数曲线、阈值扫描、ROC/PR、校准曲线、标签质量、类别分布、特征清单与运行环境。</dd>
           </div>
           <div>
             <dt>判断</dt>
-            <dd>结论卡、自查清单和警告徽标共用同一个 verdict，避免网页与报告互相打架。</dd>
+            <dd>结论卡、自查清单和警告徽标共用同一个 verdict；跨实验对比先核对数据、特征、切分和验证集规模，避免拿不可比的数字下结论。</dd>
           </div>
           <div>
             <dt>下一步</dt>
@@ -145,7 +145,7 @@
         </li>
         <li>
           <span class="step-no">03</span>
-          <div><h3>对比</h3><p>MLP、Isolation Forest、AutoEncoder 共用同一份特征矩阵；验证集选模型，测试集报成绩。</p></div>
+          <div><h3>对比</h3><p>MLP、Isolation Forest、AutoEncoder 共用同一份特征矩阵；验证集选模型，测试集报成绩，历史实验可做可比性审计。</p></div>
           <code>--models mlp,iforest,autoencoder</code>
         </li>
         <li>
@@ -164,7 +164,7 @@
           拿到报告的人可以看到结论为什么成立，也可以按指纹和命令重新跑一次；
           报告同时包含验证/测试指标、阈值来源、PR-AUC、分类召回和典型误报/漏报。
         </p>
-        <a class="report-link" href="./demo-report.html">打开实际生成的示例报告</a>
+        <a class="report-link" href="./demo-report.html">打开合成数据示例报告</a>
       </div>
       <div class="report-sample" aria-label="示例报告中的泄漏检查片段">
         <div class="sample-bar"><span>demo-report.html</span><span>standalone</span></div>
@@ -185,7 +185,7 @@ uv run flowlab demo --threshold-mode f1 --html out/report.html</code></pre>
         <h2 id="start-title">在本地跑，<br>数据不出门。</h2>
         <p>
           Web 工作台由本机 Python 服务提供，报告和实验历史都留在本地。
-          这个 GitHub Pages 只承载项目介绍和一份静态示例报告。
+          这个 GitHub Pages 只承载项目介绍和一份由合成数据生成的静态示例报告。
         </p>
         <a class="text-link" href="https://github.com/ZhuQuan181/traceledger">查看源码与文档</a>
       </div>

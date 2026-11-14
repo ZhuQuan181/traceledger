@@ -41,3 +41,14 @@ def test_duplicate_models_are_run_once():
         ExperimentSpec(models=["mlp", "mlp"]),
     )
     assert [row["model"] for row in payload["results"]] == ["mlp"]
+
+
+def test_invalid_target_fpr_is_rejected_before_training():
+    df = add_engineered_features(normalize_columns(generate(300, 50, seed=3)))
+    with pytest.raises(ValueError, match="target_fpr"):
+        execute(
+            df,
+            {"labels": {"mode": "embedded"}},
+            "test",
+            ExperimentSpec(models=["mlp"], threshold_mode="fpr", target_fpr=0),
+        )

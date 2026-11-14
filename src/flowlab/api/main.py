@@ -19,16 +19,61 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from flowlab import __version__
+from flowlab.compare import load_comparison
 from flowlab.models.registry import available
 from flowlab.pipeline import load_frame
 from flowlab.service import ExperimentSpec, demo_frame, execute
-from flowlab.store import delete_run, get_run, list_runs, save_run
+from flowlab.store import (
+    count_runs,
+    delete_run,
+    get_run,
+    history_models,
+    list_runs,
+    save_run,
+    stats,
+    update_run,
+)
 
 app = FastAPI(title="FlowLab", version=__version__)
 
 PICKLE_TOKEN = secrets.token_urlsafe(32)
 MAX_UPLOAD_BYTES = int(os.getenv("FLOWLAB_MAX_UPLOAD_MB", "1024")) * 1024 * 1024
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "font-src 'self' data:; img-src 'self' data:; connect-src 'self'; "
+        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    ),
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+}
+
+
+def _host_name(value: str) -> str | None:
+    """从 Host/Origin 风格的值里取出小写主机名，兼容 IPv6 与端口。"""
+    try:
+        host = urlparse(f"//{value}").hostname
+    except ValueError:
+        return None
+    return host.lower() if host else None
+
+
+def _allowed_hosts() -> set[str]:
+    configured = {
+        host.strip().lower()
+        for host in os.getenv("FLOWLAB_ALLOWED_HOSTS", "").split(",")
+        if host.strip()
+    }
+    return LOOPBACK_HOSTS | configured
+
+
+def _is_allowed_host(value: str | None) -> bool:
+    if not value:
+        return False
+    return _host_name(value) in _allowed_hosts()
 
 
 def _origin_parts(value: str) -> tuple[str, str, int] | None:
@@ -71,28 +116,54 @@ def _content_length(request: Request) -> int | None:
         return None
 
 
+def _with_security_headers(response):
+    for name, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
+
 @app.middleware("http")
-async def reject_cross_site_writes(request: Request, call_next):
-    """阻止网页跨站触发写操作；无 Origin 的 CLI/curl 调用不受影响。"""
+async def guard_local_api(request: Request, call_next):
+    """校验 Host 并阻止跨站写操作。
+
+    Origin 检查不能只依赖 ``request.base_url``：该值来自可伪造的 Host 头。
+    先固定 Host 白名单，才能阻断 DNS rebinding 把恶意域名解析到 localhost。
+    """
+    if not _is_allowed_host(request.headers.get("host")):
+        return _with_security_headers(
+            JSONResponse(
+                {
+                    "detail": (
+                        "拒绝不受信任的 Host。默认只允许 localhost / 127.0.0.1 / ::1；"
+                        "远程访问请设置 FLOWLAB_ALLOWED_HOSTS。"
+                    )
+                },
+                status_code=403,
+            )
+        )
     if request.method in MUTATING_METHODS and request.url.path.startswith("/api/"):
         origin = request.headers.get("origin")
         if request.headers.get("sec-fetch-site") == "cross-site" or (
             origin and not _same_origin(origin, request)
         ):
-            return JSONResponse(
-                {"detail": "拒绝跨站请求；请从 FlowLab 页面操作"},
-                status_code=403,
+            return _with_security_headers(
+                JSONResponse(
+                    {"detail": "拒绝跨站请求；请从 FlowLab 页面操作"},
+                    status_code=403,
+                )
             )
     if request.url.path == "/api/upload":
         # multipart 有两份可选文件（数据 + 标签），给协议开销留 1 MB 余量。
         max_body = MAX_UPLOAD_BYTES * 2 + 1024 * 1024
         declared = _content_length(request)
         if declared is not None and declared > max_body:
-            return JSONResponse(
-                {"detail": f"上传请求超过上限 {max_body // (1024 * 1024)} MB"},
-                status_code=413,
+            return _with_security_headers(
+                JSONResponse(
+                    {"detail": f"上传请求超过上限 {max_body // (1024 * 1024)} MB"},
+                    status_code=413,
+                )
             )
-    return await call_next(request)
+    return _with_security_headers(await call_next(request))
 
 
 def _check_pickle_token(token: str | None) -> None:
@@ -137,10 +208,16 @@ class DemoRequest(BaseModel):
         default_factory=lambda: ["mlp", "iforest", "autoencoder"], min_length=1
     )
     threshold: float = Field(0.5, ge=0, le=1)
-    threshold_mode: Literal["fixed", "f1"] = "fixed"
+    target_fpr: float = Field(0.01, gt=0, lt=1)
+    threshold_mode: Literal["fixed", "f1", "fpr"] = "fixed"
     ablate: str | None = None
     leaky: bool = False
     save: bool = True
+
+
+class HistoryUpdate(BaseModel):
+    note: str | None = Field(None, max_length=500)
+    status: Literal["unreviewed", "baseline", "failed", "archived"] | None = None
 
 
 def _validate(models: list[str]) -> None:
@@ -186,6 +263,7 @@ def demo(req: DemoRequest):
         seed=req.seed,
         threshold=req.threshold,
         threshold_mode=req.threshold_mode,
+        target_fpr=req.target_fpr,
         test_size=req.test_size,
         validation_size=req.validation_size,
         ablate=req.ablate,
@@ -212,6 +290,7 @@ async def upload(
     models: str = Form("mlp,iforest,autoencoder"),
     threshold: float = Form(0.5),
     threshold_mode: str = Form("fixed"),
+    target_fpr: float = Form(0.01),
     seed: int = Form(42),
     test_size: float = Form(0.3),
     validation_size: float = Form(0.2),
@@ -226,8 +305,10 @@ async def upload(
         raise HTTPException(400, "split 只能是 temporal、random 或 group")
     if not 0 <= threshold <= 1:
         raise HTTPException(400, "threshold 应在 0~1 之间")
-    if threshold_mode not in {"fixed", "f1"}:
-        raise HTTPException(400, "threshold_mode 只能是 fixed 或 f1")
+    if threshold_mode not in {"fixed", "f1", "fpr"}:
+        raise HTTPException(400, "threshold_mode 只能是 fixed、f1 或 fpr")
+    if not 0 < target_fpr < 1:
+        raise HTTPException(400, "target_fpr 应在 0~1 之间")
     if not 0.05 <= test_size <= 0.5:
         raise HTTPException(400, "test_size 应在 0.05~0.5 之间")
     if not 0.05 <= validation_size <= 0.4:
@@ -281,6 +362,7 @@ async def upload(
         seed=seed,
         threshold=threshold,
         threshold_mode=threshold_mode,
+        target_fpr=target_fpr,
         test_size=test_size,
         validation_size=validation_size,
         ablate=ablate or None,
@@ -308,8 +390,49 @@ async def upload(
 
 
 @app.get("/api/history")
-def history(limit: int = Query(20, ge=1, le=100)):
-    return {"runs": list_runs(limit)}
+def history(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    q: str = Query("", max_length=200),
+    model: str | None = Query(None, max_length=80),
+    status: Literal["unreviewed", "baseline", "failed", "archived"] | None = None,
+):
+    return {
+        "runs": list_runs(limit, offset, q, model, status),
+        "total": count_runs(q, model, status),
+        "available": count_runs(),
+        "db_bytes": stats()["db_bytes"],
+        "models": history_models(),
+    }
+
+
+@app.patch("/api/history/{run_id}")
+def history_update(run_id: str, req: HistoryUpdate):
+    if req.note is None and req.status is None:
+        raise HTTPException(400, "至少提供 note 或 status")
+    try:
+        record = update_run(run_id, note=req.note, status=req.status)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if record is None:
+        raise HTTPException(404, "没有这次实验")
+    return {
+        "id": record["id"],
+        "note": record["note"],
+        "status": record["status"],
+        "updated_at": record["updated_at"],
+    }
+
+
+@app.get("/api/compare")
+def history_compare(ids: str = Query(..., description="逗号分隔的 2–4 个实验 ID")):
+    run_ids = [value.strip() for value in ids.split(",") if value.strip()]
+    try:
+        return load_comparison(run_ids)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @app.delete("/api/history")

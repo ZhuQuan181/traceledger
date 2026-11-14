@@ -3,20 +3,28 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
+import platform
 from datetime import datetime
 
 import pandas as pd
 
+from flowlab import __version__
 from flowlab.eval.checklist import build_checklist
 from flowlab.eval.runner import EvalResult, select_best, selection_auc
 from flowlab.eval.verdict import judge
+from flowlab.quality import label_quality
 from flowlab.report.html import render_html
 from flowlab.report.markdown import render_report
 
 
 def _experiment_fingerprint(
-    dataset: dict, results: list[dict], warns: list[dict], ablation: dict | None
+    dataset: dict,
+    results: list[dict],
+    warns: list[dict],
+    ablation: dict | None,
+    environment: dict,
 ) -> str:
     """指标与决策内容的稳定指纹；刻意排除耗时和生成时间。"""
     stable_results = []
@@ -38,15 +46,36 @@ def _experiment_fingerprint(
                 "threshold",
                 "threshold_mode",
                 "threshold_source",
+                "threshold_target_fpr",
                 "selection",
             )
         },
         "results": stable_results,
         "warnings": warns,
         "ablation": ablation,
+        "environment": environment,
     }
     blob = json.dumps(core, ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+def _environment() -> dict:
+    """记录复现所需的最小运行环境，不采集机器名、路径等本地信息。"""
+    packages: dict[str, str | None] = {}
+    for name, distribution in (
+        ("pandas", "pandas"),
+        ("numpy", "numpy"),
+        ("scikit_learn", "scikit-learn"),
+    ):
+        try:
+            packages[name] = importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            packages[name] = None
+    return {
+        "flowlab": __version__,
+        "python": platform.python_version(),
+        **packages,
+    }
 
 
 def _class_distribution(df: pd.DataFrame, label_col: str = "label", top: int = 8) -> list[dict]:
@@ -71,8 +100,14 @@ def build_payload(
     label_col: str = "label",
 ) -> dict:
     meta = dict(meta or {})
+    environment = _environment()
     r0 = results[0] if results else None
     best = select_best(results)
+    quality = label_quality(
+        df,
+        label_col,
+        test_by_label=best.by_label if best else None,
+    )
 
     dataset = {
         "source": source,
@@ -96,6 +131,7 @@ def build_payload(
         "threshold_mode": meta.get("threshold_mode")
         or (meta.get("experiment") or {}).get("threshold_mode", "fixed"),
         "threshold_source": best.threshold_source if best else "fixed",
+        "threshold_target_fpr": best.threshold_target_fpr if best else None,
         "seed": r0.seed if r0 else 42,
         "attack_train": r0.attack_train if r0 else 0,
         "attack_validation": r0.attack_validation if r0 else 0,
@@ -109,13 +145,16 @@ def build_payload(
         "engineering": meta.get("engineering", {}),
         "format": meta.get("format", {}),
         "classes": _class_distribution(df, label_col),
+        "quality": quality,
         "features": {
             "used": results[0].features if results else [],
             "encoded": results[0].encoded_features if results else 0,
         },
     }
     result_dicts = [r.to_dict() for r in results]
-    recommendation_fingerprint = _experiment_fingerprint(dataset, result_dicts, warns, ablation)
+    recommendation_fingerprint = _experiment_fingerprint(
+        dataset, result_dicts, warns, ablation, environment
+    )
     generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
     experiment = meta.get("experiment") or {
         "source": source,
@@ -130,12 +169,14 @@ def build_payload(
         "engineering": dataset["engineering"],
         "format": dataset["format"],
         "classes": dataset["classes"],
+        "quality": dataset["quality"],
         "features": dataset["features"],
         "attack_support": dataset["attack_test"],
         "investigation": (best.to_dict().get("by_label", []) if best else []),
         "experiment": experiment,
         "generated_at": generated_at,
         "experiment_fingerprint": recommendation_fingerprint,
+        "environment": environment,
     }
     dataset["experiment_fingerprint"] = recommendation_fingerprint
 
@@ -162,6 +203,7 @@ def build_payload(
         "experiment": experiment,
         "generated_at": generated_at,
         "experiment_fingerprint": recommendation_fingerprint,
+        "environment": environment,
         "verdict": report_meta["verdict"],
         "checklist": checklist,
         "warnings": warns,

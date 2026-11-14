@@ -99,3 +99,14 @@ def test_missing_hash_fails():
     items = build_checklist(_ds(hash=""), [], {"column": "x", "rows": []})
     item = next(i for i in items if i["item"] == "记录数据指纹与随机种子")
     assert item["ok"] is False
+
+
+def test_label_conflicts_fail_quality_item():
+    items = build_checklist(
+        _ds(quality={"missing_labels": 0, "conflict_groups": 1, "duplicate_rows": 3}),
+        [],
+        {"column": "x", "rows": []},
+    )
+    item = next(i for i in items if i["item"] == "标签质量已检查")
+    assert item["ok"] is False
+    assert "同一实体多标签 1" in item["detail"]

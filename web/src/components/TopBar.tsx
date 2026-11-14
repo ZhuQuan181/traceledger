@@ -1,14 +1,26 @@
 import type { Payload, RunRow } from "../types";
 import { RunTimeline } from "./RunTimeline";
 
-export function TopBar({ payload, busy, runs, activeRun, onOpenRun, mobilePanel, onOpenPanel }: {
+export function TopBar({
+  payload,
+  busy,
+  runs,
+  activeRun,
+  onOpenRun,
+  mobilePanel,
+  onOpenPanel,
+  onCompare,
+  onHistory,
+}: {
   payload: Payload | null;
   busy: boolean;
   runs: RunRow[];
   activeRun?: string;
   onOpenRun: (id: string) => void;
-  mobilePanel: "config" | "history" | "context" | null;
-  onOpenPanel: (panel: "config" | "history" | "context") => void;
+  mobilePanel: "config" | "context" | null;
+  onOpenPanel: (panel: "config" | "context") => void;
+  onCompare: () => void;
+  onHistory: () => void;
 }) {
   return (
     <header className="topbar">
@@ -25,16 +37,19 @@ export function TopBar({ payload, busy, runs, activeRun, onOpenRun, mobilePanel,
       </div>
 
       <div className="top-actions">
+        <button className="compare-trigger history-trigger" type="button" onClick={onHistory}
+                aria-haspopup="dialog">
+          历史
+        </button>
+        <button className="compare-trigger" type="button" onClick={onCompare}
+                aria-haspopup="dialog">
+          对比
+        </button>
         <nav className="mobile-nav" aria-label="移动端视图">
           <button className={mobilePanel === "config" ? "on" : ""}
                   aria-expanded={mobilePanel === "config"} aria-controls="config-drawer"
                   onClick={() => onOpenPanel("config")}>
             配置
-          </button>
-          <button className={mobilePanel === "history" ? "on" : ""}
-                  aria-expanded={mobilePanel === "history"} aria-controls="history-drawer"
-                  onClick={() => onOpenPanel("history")}>
-            历史
           </button>
           <button className={mobilePanel === "context" ? "on" : ""}
                   aria-expanded={mobilePanel === "context"} aria-controls="context-drawer"

@@ -46,7 +46,8 @@ export type Result = {
   n_validation: number;
   n_test: number;
   threshold: number;
-  threshold_source?: "fixed" | "validation_f1";
+  threshold_source?: "fixed" | "validation_f1" | "validation_fpr";
+  threshold_target_fpr?: number | null;
   threshold_scan: {
     threshold: number;
     precision: number;
@@ -54,6 +55,11 @@ export type Result = {
     f1: number;
     fpr: number | null;
   }[];
+  roc_curve: { fpr: number; tpr: number; threshold: number | null }[];
+  pr_curve: { precision: number; recall: number; threshold: number | null }[];
+  calibration: { mean_predicted: number; fraction_positive: number }[];
+  brier_score: number | null;
+  calibration_note: string;
   seed?: number;
   attack_train?: number;
   attack_validation?: number;
@@ -109,8 +115,9 @@ export type Dataset = {
     entity_overlap?: Record<string, number>;
   };
   threshold: number;
-  threshold_mode?: "fixed" | "f1";
-  threshold_source?: "fixed" | "validation_f1";
+  threshold_mode?: "fixed" | "f1" | "fpr";
+  threshold_source?: "fixed" | "validation_f1" | "validation_fpr";
+  threshold_target_fpr?: number | null;
   seed?: number;
   attack_train?: number;
   attack_validation?: number;
@@ -120,6 +127,20 @@ export type Dataset = {
   engineering?: { min_duration_ms?: number; derived?: string[]; note?: string };
   format?: { format?: string; shape?: string; note?: string; pickle_object?: string };
   classes?: { label: string; count: number }[];
+  quality?: {
+    rows: number;
+    class_count: number;
+    missing_labels: number;
+    duplicate_rows: number;
+    duplicate_rate: number;
+    rare_threshold: number;
+    rare_classes: { label: string; count: number }[];
+    rare_test_labels: { label: string; total: number }[];
+    conflict_key: string | null;
+    conflict_groups: number;
+    conflict_rows: number;
+    conflict_examples: { entity: string; labels: string[]; rows: number }[];
+  };
   features?: { used: string[]; encoded: number };
   experiment_fingerprint?: string;
 };
@@ -144,6 +165,13 @@ export type ChecklistItem = { item: string; ok: boolean; detail: string };
 export type Payload = {
   dataset: Dataset;
   experiment: Experiment;
+  environment?: {
+    flowlab?: string;
+    python?: string;
+    pandas?: string | null;
+    numpy?: string | null;
+    scikit_learn?: string | null;
+  };
   generated_at: string;
   experiment_fingerprint: string;
   verdict?: Verdict;
@@ -176,7 +204,8 @@ export type Experiment = {
   validation_size: number;
   seed: number;
   threshold: number;
-  threshold_mode: "fixed" | "f1";
+  threshold_mode: "fixed" | "f1" | "fpr";
+  target_fpr: number;
   explain: boolean;
   ablate: string | null;
   source_kind: "demo" | "upload" | "file";
@@ -188,20 +217,94 @@ export type Experiment = {
   command: string;
 };
 
+export type RunStatus = "unreviewed" | "baseline" | "failed" | "archived";
+
 export type RunRow = {
   id: string;
   schema_version?: number;
   created_at: string;
+  updated_at?: string | null;
   source: string;
   dataset_hash: string;
   split: string;
   rows: number;
   validation?: number;
+  test?: number;
+  threshold?: number;
   best_model: string | null;
   best_auc: number | null;
   best_validation_auc?: number | null;
   models?: string[];
   fingerprint?: string | null;
+  note?: string;
+  status?: RunStatus;
+};
+
+export type HistoryPage = {
+  runs: RunRow[];
+  total: number;
+  available: number;
+  db_bytes: number;
+  models: string[];
+};
+
+export type ComparisonCheck = {
+  key: "dataset" | "features" | "split";
+  label: string;
+  ok: boolean;
+  detail: string;
+};
+
+export type ComparisonDelta = {
+  validation_auc: number | null;
+  test_auc: number | null;
+  pr_auc: number | null;
+  f1: number | null;
+  recall: number | null;
+  fpr: number | null;
+};
+
+export type ComparisonRun = {
+  id: string;
+  created_at: string;
+  source: string;
+  dataset_hash: string;
+  split: string;
+  seed?: number | null;
+  rows?: number | null;
+  train?: number | null;
+  validation?: number | null;
+  validation_size?: number | null;
+  test?: number | null;
+  attack_test?: number | null;
+  model: string | null;
+  validation_auc: number | null;
+  test_auc: number | null;
+  pr_auc: number | null;
+  f1: number | null;
+  precision: number | null;
+  recall: number | null;
+  fpr: number | null;
+  threshold: number | null;
+  threshold_source?: "fixed" | "validation_f1" | "validation_fpr" | null;
+  threshold_mode?: "fixed" | "f1" | "fpr" | null;
+  duration_s: number | null;
+  features: string[];
+  encoded_features?: number | null;
+  experiment_fingerprint?: string | null;
+  delta: ComparisonDelta;
+};
+
+export type Comparison = {
+  status: "comparable" | "limited" | "incompatible";
+  comparable: boolean;
+  headline: string;
+  warnings: string[];
+  checks: ComparisonCheck[];
+  baseline_run_id: string;
+  command: string;
+  runs: ComparisonRun[];
+  markdown: string;
 };
 
 export type ModelInfo = { name: string; kind: string };

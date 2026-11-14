@@ -6,11 +6,16 @@ import App from "./App";
 import type { Payload, RunRow } from "./types";
 
 vi.mock("./api", () => ({
+  fetchComparison: vi.fn(),
   fetchModels: vi.fn(),
   fetchHistory: vi.fn(),
+  fetchHistoryPage: vi.fn(),
+  deleteRun: vi.fn(),
+  pruneHistory: vi.fn(),
   loadRun: vi.fn(),
   runDemo: vi.fn(),
   runUpload: vi.fn(),
+  updateRunMeta: vi.fn(),
 }));
 
 const run: RunRow = {
@@ -110,6 +115,13 @@ describe("App history restore", () => {
   beforeEach(() => {
     vi.mocked(api.fetchModels).mockResolvedValue([{ name: "mlp", kind: "supervised" }]);
     vi.mocked(api.fetchHistory).mockResolvedValue([run]);
+    vi.mocked(api.fetchHistoryPage).mockResolvedValue({
+      runs: [{ ...run, note: "removed dst_port", status: "unreviewed" }],
+      total: 1,
+      available: 1,
+      db_bytes: 4096,
+      models: ["mlp"],
+    });
     vi.mocked(api.loadRun).mockResolvedValue(payload);
   });
 
@@ -178,5 +190,78 @@ describe("App history restore", () => {
     render(<App />);
     await user.click(screen.getByRole("button", { name: "配置" }));
     expect(screen.getByRole("dialog", { name: "实验配置" })).toHaveAttribute("aria-modal", "true");
+  });
+
+  it("opens the cross-experiment comparison from the top bar", async () => {
+    const comparisonRuns = [
+      run,
+      {
+        ...run,
+        id: "def456",
+        created_at: "2026-11-15T10:00:00+08:00",
+        best_model: "iforest",
+        best_auc: 0.95,
+      },
+    ];
+    vi.mocked(api.fetchHistory).mockResolvedValue(comparisonRuns);
+    vi.mocked(api.fetchHistoryPage).mockResolvedValue({
+      runs: comparisonRuns,
+      total: comparisonRuns.length,
+      available: comparisonRuns.length,
+      db_bytes: 4096,
+      models: ["mlp", "iforest"],
+    });
+    vi.mocked(api.fetchComparison).mockResolvedValue({
+      status: "comparable",
+      comparable: true,
+      headline: "可直接比较：同数据、同特征、同切分",
+      warnings: [],
+      checks: [
+        { key: "dataset", label: "数据指纹", ok: true, detail: "全部使用 deadbeef" },
+        { key: "features", label: "特征矩阵", ok: true, detail: "特征列一致" },
+        { key: "split", label: "切分与测试集", ok: true, detail: "切分一致" },
+      ],
+      baseline_run_id: "abc123",
+      command: "uv run flowlab compare abc123 def456",
+      runs: [],
+      markdown: "# 对比",
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "对比" }));
+    expect(screen.getByRole("dialog", { name: "跨实验对比" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("checkbox", { name: "选择 abc123" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 def456" }));
+    await user.click(screen.getByRole("button", { name: "生成对比" }));
+    expect(await screen.findByText("可直接比较")).toBeInTheDocument();
+    expect(api.fetchComparison).toHaveBeenCalledWith(["abc123", "def456"]);
+  });
+
+  it("opens searchable history and saves annotations", async () => {
+    vi.mocked(api.updateRunMeta).mockResolvedValue({
+      id: "abc123",
+      note: "keep this baseline",
+      status: "baseline",
+      updated_at: "2026-11-15T10:00:00+08:00",
+    });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "历史" }));
+    expect(screen.getByRole("dialog", { name: "实验历史" })).toBeInTheDocument();
+    expect(await screen.findByText(/removed dst_port/)).toBeInTheDocument();
+    expect(screen.getByText("4.0 KB")).toBeInTheDocument();
+
+    await user.type(screen.getByRole("searchbox", { name: "搜索历史" }), "port");
+    await waitFor(() => {
+      expect(api.fetchHistoryPage).toHaveBeenLastCalledWith(
+        expect.objectContaining({ q: "port" }),
+      );
+    });
+
+    await user.click(screen.getByText("备注 / 状态"));
+    await user.selectOptions(screen.getByRole("combobox", { name: "状态 abc123" }), "baseline");
+    await waitFor(() => {
+      expect(api.updateRunMeta).toHaveBeenCalledWith("abc123", { status: "baseline" });
+    });
   });
 });

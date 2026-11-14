@@ -12,7 +12,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+STATUSES = ("unreviewed", "baseline", "failed", "archived")
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
   id            TEXT PRIMARY KEY,
@@ -35,6 +36,9 @@ CREATE TABLE IF NOT EXISTS runs (
   best_validation_auc REAL,
   models        TEXT,
   fingerprint   TEXT,
+  note          TEXT NOT NULL DEFAULT '',
+  status        TEXT NOT NULL DEFAULT 'unreviewed',
+  updated_at    TEXT,
   payload       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at DESC);
@@ -47,6 +51,9 @@ MIGRATION_COLUMNS = {
     "best_validation_auc": "REAL",
     "models": "TEXT",
     "fingerprint": "TEXT",
+    "note": "TEXT NOT NULL DEFAULT ''",
+    "status": "TEXT NOT NULL DEFAULT 'unreviewed'",
+    "updated_at": "TEXT",
 }
 
 
@@ -80,18 +87,19 @@ def save_run(payload: dict) -> str:
         )
     ds = payload.get("dataset") or {}
     rid = uuid.uuid4().hex[:10]
+    now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
     with connect() as conn:
         conn.execute(
             """INSERT INTO runs (
               id, schema_version, created_at, source, dataset_hash, split, seed,
               threshold, rows, train, validation, test, attack_train,
               attack_validation, attack_test, best_model, best_auc,
-              best_validation_auc, models, fingerprint, payload
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+              best_validation_auc, models, fingerprint, note, status, updated_at, payload
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 rid,
                 SCHEMA_VERSION,
-                datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+                now,
                 ds.get("source"),
                 ds.get("hash"),
                 ds.get("split"),
@@ -112,19 +120,58 @@ def save_run(payload: dict) -> str:
                     ensure_ascii=False,
                 ),
                 payload.get("experiment_fingerprint"),
+                "",
+                "unreviewed",
+                now,
                 json.dumps(payload, ensure_ascii=False),
             ),
         )
     return rid
 
 
-def list_runs(limit: int = 20) -> list[dict]:
+def _like(value: str) -> str:
+    escaped = value.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def _history_filters(
+    query: str = "", model: str | None = None, status: str | None = None
+) -> tuple[list[str], list[str]]:
+    conditions: list[str] = []
+    params: list[str] = []
+    if query.strip():
+        pattern = _like(query)
+        conditions.append(
+            "(id LIKE ? ESCAPE '\\' OR source LIKE ? ESCAPE '\\' "
+            "OR dataset_hash LIKE ? ESCAPE '\\' OR best_model LIKE ? ESCAPE '\\' "
+            "OR note LIKE ? ESCAPE '\\')"
+        )
+        params.extend([pattern] * 5)
+    if model:
+        conditions.append("models LIKE ? ESCAPE '\\'")
+        params.append(_like(f'"{model}"'))
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
+    return conditions, params
+
+
+def list_runs(
+    limit: int = 20,
+    offset: int = 0,
+    query: str = "",
+    model: str | None = None,
+    status: str | None = None,
+) -> list[dict]:
+    conditions, params = _history_filters(query, model, status)
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     with connect() as conn:
         rows = conn.execute(
             "SELECT id,schema_version,created_at,source,dataset_hash,split,rows,"
-            "validation,best_model,best_auc,best_validation_auc,models,fingerprint "
-            "FROM runs ORDER BY created_at DESC LIMIT ?",
-            (limit,),
+            "validation,test,threshold,best_model,best_auc,best_validation_auc,"
+            "models,fingerprint,note,status,updated_at "
+            f"FROM runs {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            (*params, limit, offset),
         ).fetchall()
     out = []
     for row in rows:
@@ -132,6 +179,33 @@ def list_runs(limit: int = 20) -> list[dict]:
         item["models"] = json.loads(item["models"]) if item.get("models") else []
         out.append(item)
     return out
+
+
+def count_runs(query: str = "", model: str | None = None, status: str | None = None) -> int:
+    conditions, params = _history_filters(query, model, status)
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    with connect() as conn:
+        return int(conn.execute(f"SELECT COUNT(*) FROM runs {where}", params).fetchone()[0])
+
+
+def history_models() -> list[str]:
+    with connect() as conn:
+        rows = conn.execute("SELECT models FROM runs WHERE models IS NOT NULL").fetchall()
+    names: set[str] = set()
+    for row in rows:
+        try:
+            names.update(str(value) for value in json.loads(row["models"]))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return sorted(names)
+
+
+def stats() -> dict:
+    path = db_path()
+    return {
+        "count": count(),
+        "db_bytes": path.stat().st_size if path.exists() else 0,
+    }
 
 
 def get_run(run_id: str) -> dict | None:
@@ -142,6 +216,34 @@ def get_run(run_id: str) -> dict | None:
     out = dict(row)
     out["payload"] = json.loads(out["payload"])
     return out
+
+
+def update_run(
+    run_id: str,
+    *,
+    note: str | None = None,
+    status: str | None = None,
+) -> dict | None:
+    if status is not None and status not in STATUSES:
+        raise ValueError(f"status 只能是 {STATUSES}")
+    updates: list[str] = []
+    params: list[str] = []
+    if note is not None:
+        updates.append("note = ?")
+        params.append(note.strip()[:500])
+    if status is not None:
+        updates.append("status = ?")
+        params.append(status)
+    if not updates:
+        raise ValueError("至少提供 note 或 status")
+    updates.append("updated_at = ?")
+    params.append(datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"))
+    params.append(run_id)
+    with connect() as conn:
+        changed = conn.execute(
+            f"UPDATE runs SET {', '.join(updates)} WHERE id = ?", params
+        ).rowcount
+    return get_run(run_id) if changed else None
 
 
 def compare(run_ids: list[str]) -> list[dict]:

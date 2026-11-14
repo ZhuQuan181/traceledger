@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 
 from flowlab.eval.runner import EvalResult
 from flowlab.report.view import ReportView, build_view
@@ -96,6 +97,23 @@ font:10px/1 "IBM Plex Mono",monospace;color:var(--muted);padding-bottom:1px}
 .thr span{position:absolute;right:6px;top:-16px;padding:1px 5px;background:var(--paper);
 font:10px/1 "IBM Plex Mono",monospace;color:var(--alert)}
 .cap{color:var(--muted);font-size:11px;display:flex;justify-content:space-between;gap:12px;margin-top:8px}
+.diag{margin-top:20px;padding-top:16px;border-top:1px solid var(--rule)}
+.diag-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:11px}
+.diag-head h3{margin:0}
+.diag-head p{margin:2px 0 0;font-size:11px;color:var(--muted)}
+.brier{flex:none;padding:4px 8px;border:1px solid var(--rule2);
+font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink2)}
+.diag-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.diag-card{margin:0;padding:10px 11px 8px;border:1px solid var(--rule);background:#fffdf8}
+.diag-card figcaption{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:5px}
+.diag-card strong{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink2)}
+.diag-card span{font-size:9.5px;color:var(--muted)}
+.diag-card svg{display:block;width:100%;height:auto}
+.diag-gridline{stroke:rgba(20,22,26,.1);stroke-width:.7}
+.diag-axis{stroke:var(--rule2);stroke-width:1}
+.diag-guide{stroke:var(--rule2);stroke-width:1;stroke-dasharray:3 3}
+.diag-line{fill:none;stroke:var(--navy);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.diag-tick{fill:var(--muted);font-family:"IBM Plex Mono",monospace;font-size:9px}
 .leaks{display:flex;flex-direction:column}
 .leak{display:grid;grid-template-columns:104px 1fr;gap:18px;padding:14px 0 14px 14px;
 border-bottom:1px solid var(--rule);border-left:2px solid var(--rule2)}
@@ -133,7 +151,11 @@ h1{font-size:30px}h2{font-size:21px;margin-top:34px}
 .verdict table.check td:last-child{display:block;margin-top:2px;color:var(--muted)}
 .sigwrap{grid-template-columns:24px 1fr}.signal{height:120px}
 .cap{flex-wrap:wrap}.cap span:nth-child(2){flex-basis:100%;order:3}
+.diag-head{align-items:flex-start;flex-wrap:wrap}.diag-grid{grid-template-columns:1fr}
 .command{font-size:11px}
+}
+@media(max-width:380px){
+h1{font-size:25px}h2{font-size:20px}
 }
 @media print{body{background:#fff;padding:0}.wrap{max-width:none}
 .table-scroll{overflow:visible}table.data.wide,table.data.flows{min-width:0}}
@@ -152,6 +174,17 @@ def _fmt(value, digits: int = 3, signed: bool = False) -> str:
     except (TypeError, ValueError):
         return str(value)
     return f"{number:+.{digits}f}" if signed else f"{number:.{digits}f}"
+
+
+def _threshold_source(v: ReportView) -> str:
+    if v.threshold_source == "validation_f1":
+        return "验证集 F1 自动选择"
+    if v.threshold_source == "validation_fpr":
+        target = (
+            f"≤{v.threshold_target_fpr:.2%}" if v.threshold_target_fpr is not None else "目标值"
+        )
+        return f"验证集目标误报率自动选择（{target}）"
+    return "人工指定"
 
 
 def _signal(v: ReportView) -> str:
@@ -173,6 +206,88 @@ def _signal(v: ReportView) -> str:
         f'<div class="cap"><span>{"按时间排序" if v.curve_basis == "time" else "按测试样本顺序"}</span>'
         f"<span>柱高＝该窗最高分；红色柱＝窗内 ≥20% 的流超阈值（{hits_n}/{len(v.curve)}）</span>"
         f"<span>共 {len(v.curve)} 个窗口</span></div>"
+    )
+
+
+def _curve_svg(
+    points: list[dict],
+    x_key: str,
+    y_key: str,
+    *,
+    diagonal: bool = False,
+) -> str:
+    if not points:
+        return ""
+    width, height, pad = 320, 190, 23
+    span = width - pad * 2
+    yspan = height - pad * 2
+    coords = [
+        (pad + float(point[x_key]) * span, height - pad - float(point[y_key]) * yspan)
+        for point in points
+    ]
+    polyline = " ".join(f"{x:.2f},{y:.2f}" for x, y in coords)
+    grid = "".join(
+        f'<line class="diag-gridline" x1="{pad + tick * span:.1f}" '
+        f'y1="{height - pad:.1f}" x2="{pad + tick * span:.1f}" y2="{pad:.1f}"/>'
+        f'<line class="diag-gridline" x1="{pad:.1f}" '
+        f'y1="{height - pad - tick * yspan:.1f}" x2="{width - pad:.1f}" '
+        f'y2="{height - pad - tick * yspan:.1f}"/>'
+        for tick in (0.25, 0.5, 0.75)
+    )
+    guide = (
+        f'<line class="diag-guide" x1="{pad}" y1="{height - pad}" x2="{width - pad}" y2="{pad}"/>'
+        if diagonal
+        else ""
+    )
+    return (
+        f'<svg viewBox="0 0 {width} {height}" role="img">'
+        f"{grid}{guide}"
+        f'<line class="diag-axis" x1="{pad}" y1="{height - pad}" '
+        f'x2="{width - pad}" y2="{height - pad}"/>'
+        f'<line class="diag-axis" x1="{pad}" y1="{height - pad}" '
+        f'x2="{pad}" y2="{pad}"/>'
+        f'<polyline class="diag-line" points="{polyline}"/>'
+        f'<text class="diag-tick" x="{pad}" y="{height - 7}">0</text>'
+        f'<text class="diag-tick" x="{width - pad}" y="{height - 7}" text-anchor="end">1</text>'
+        f'<text class="diag-tick" x="{pad - 6}" y="{pad + 3}" text-anchor="end">1</text>'
+        f'<text class="diag-tick" x="{pad - 6}" y="{height - pad + 3}" text-anchor="end">0</text>'
+        f"</svg>"
+    )
+
+
+def _curves_html(v: ReportView) -> str:
+    if not (v.roc_curve or v.pr_curve or v.calibration):
+        return ""
+    cards: list[str] = []
+    specs = [
+        ("ROC", "FPR → TPR", v.roc_curve, "fpr", "tpr", True),
+        ("PR", "召回率 → 精确率", v.pr_curve, "recall", "precision", False),
+        (
+            "校准",
+            "预测概率 → 实际攻击比例",
+            v.calibration,
+            "mean_predicted",
+            "fraction_positive",
+            True,
+        ),
+    ]
+    for title, caption, points, x_key, y_key, diagonal in specs:
+        if not points:
+            continue
+        cards.append(
+            f'<figure class="diag-card"><figcaption><strong>{title}</strong>'
+            f"<span>{caption}</span></figcaption>"
+            f"{_curve_svg(points, x_key, y_key, diagonal=diagonal)}</figure>"
+        )
+    brier = (
+        f'<span class="brier">Brier {v.brier_score:.4f}</span>' if v.brier_score is not None else ""
+    )
+    note = f'<p class="cap">{_e(v.calibration_note)}</p>' if v.calibration_note else ""
+    return (
+        '<div class="diag"><div class="diag-head"><div>'
+        f"<h3>排序与校准（{_e(v.best_model)}）</h3>"
+        "<p>曲线来自测试集；PR/ROC 反映排序能力，校准只对概率输出有意义。</p>"
+        f'</div>{brier}</div><div class="diag-grid">{"".join(cards)}</div>{note}</div>'
     )
 
 
@@ -207,6 +322,18 @@ def render_html(
         f'<td class="num bad">{_e(m.fn)}</td><td class="num">{_e(m.tn)}</td></tr>'
         for m in v.models
     )
+    model_params_rows = "".join(
+        f'<tr><th scope="row" class="mono">{_e(m.model)}</th>'
+        f'<td class="mono">{_e(json.dumps(m.params, ensure_ascii=False, sort_keys=True))}</td></tr>'
+        for m in v.models
+    )
+    model_params_html = (
+        "<h3>模型参数</h3>"
+        '<div class="table-scroll"><table class="data"><thead><tr><th>模型</th>'
+        f"<th>参数</th></tr></thead><tbody>{model_params_rows}</tbody></table></div>"
+        if model_params_rows
+        else ""
+    )
 
     warn_html = (
         "".join(
@@ -236,6 +363,7 @@ def render_html(
         if threshold_rows
         else ""
     )
+    curves_html = _curves_html(v)
 
     flow_rows = "".join(
         f'<tr><td class="mono">{_e(f.get("src_ip"))}</td><td class="mono">{_e(f.get("dst_ip"))}</td>'
@@ -344,19 +472,38 @@ def render_html(
             ),
             ("数据指纹", f'<span class="mono">{_e(v.hash)}</span>'),
             ("实验指纹", f'<span class="mono">{_e(v.experiment_fingerprint)}</span>'),
+            (
+                "运行环境",
+                _e(
+                    " · ".join(
+                        f"{key} {value}"
+                        for key, value in v.environment.items()
+                        if value is not None
+                    )
+                ),
+            ),
             ("切分方式", split_text),
             ("泛化场景", v.generalization),
             ("随机种子", str(v.seed)),
             (
                 "判定阈值",
-                f"{v.threshold}（"
-                + ("验证集 F1 自动选择" if v.threshold_source == "validation_f1" else "人工指定")
-                + "）",
+                f"{v.threshold}（{_threshold_source(v)}）",
             ),
             ("模型选择", "验证集 AUC（测试集只做最终报告）"),
             ("标签对齐", f"{_e(v.labels_mode)}（{v.labels_labelled}/{v.labels_total}）"),
             ("速率兜底", f"{v.min_duration_ms} ms"),
             ("类别分布", " · ".join(f"{c['label']} {c['count']:,}" for c in v.classes) or "—"),
+            (
+                "标签质量",
+                (
+                    f"缺失 {int(v.quality.get('missing_labels') or 0):,} · "
+                    f"重复行 {int(v.quality.get('duplicate_rows') or 0):,} · "
+                    f"同实体多标签 {int(v.quality.get('conflict_groups') or 0):,} · "
+                    f"稀有类别 {len(v.quality.get('rare_classes') or [])}"
+                )
+                if v.quality
+                else "—",
+            ),
             ("训练特征", f"{len(v.features)} 列（编码后 {v.encoded_features} 维）"),
             ("生成时间", _e(v.generated_at)),
         ]
@@ -373,7 +520,13 @@ def render_html(
     five = "05" if v.ablation else "04"
     command = v.reproduction_command or (
         f"uv run flowlab demo --split {v.split_requested} --seed {v.seed} "
-        f"--threshold {v.threshold} --models {','.join(m.model for m in v.models)}"
+        f"--threshold {v.threshold} --threshold-mode {v.threshold_mode} "
+        + (
+            f"--target-fpr {v.threshold_target_fpr} "
+            if v.threshold_mode == "fpr" and v.threshold_target_fpr is not None
+            else ""
+        )
+        + f"--models {','.join(m.model for m in v.models)}"
     )
     source_note = (
         "上传文件的原路径不会写入历史；复现前请重新选择同名数据与标签文件。"
@@ -487,6 +640,8 @@ def render_html(
 <th class="num">精确率</th><th class="num">召回率</th><th class="num">误报率</th><th class="num">阈值</th><th class="num">耗时</th>
 <th class="num">TP</th><th class="num">FP</th><th class="num">FN</th><th class="num">TN</th></tr></thead>
 <tbody>{model_rows}</tbody></table></div>
+{model_params_html}
+{curves_html}
 
 <h2><span class="idx">03</span>数据泄漏检查</h2>
 <div class="leaks">{warn_html}</div>

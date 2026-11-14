@@ -36,8 +36,14 @@ def _add_run_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--threshold-mode",
         default="fixed",
-        choices=["fixed", "f1"],
-        help="fixed=使用 --threshold；f1=只在验证集上按 F1 自动选阈值",
+        choices=["fixed", "f1", "fpr"],
+        help="fixed=使用 --threshold；f1=验证集 F1；fpr=验证集目标误报率",
+    )
+    p.add_argument(
+        "--target-fpr",
+        type=float,
+        default=0.01,
+        help="threshold-mode=fpr 时的目标误报率，例如 0.01 表示 1%",
     )
     p.add_argument("--json", action="store_true")
     p.add_argument("--report", type=Path, help="Markdown 报告输出路径")
@@ -88,7 +94,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     h = sub.add_parser("history", help="最近的实验（本地 SQLite）")
     h.add_argument("--limit", type=int, default=20)
+    h.add_argument("--offset", type=int, default=0)
+    h.add_argument("--search", default="", help="按来源、指纹、模型或备注搜索")
+    h.add_argument("--model", help="只看包含该模型的历史")
+    h.add_argument(
+        "--status",
+        choices=["unreviewed", "baseline", "failed", "archived"],
+        help="按人工状态筛选",
+    )
     h.add_argument("--prune", type=int, metavar="KEEP", help="只保留最近 KEEP 条，其余删除")
+
+    an = sub.add_parser("annotate", help="给历史实验加备注或人工状态")
+    an.add_argument("run_id")
+    an.add_argument("--note", help="备注，最多 500 字")
+    an.add_argument(
+        "--status",
+        choices=["unreviewed", "baseline", "failed", "archived"],
+    )
 
     sh = sub.add_parser("show", help="查看某次实验，可导出报告")
     sh.add_argument("run_id")
@@ -97,6 +119,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     cm = sub.add_parser("compare", help="对比多次实验的最佳指标")
     cm.add_argument("run_ids", nargs="+")
+    cm.add_argument("--json", action="store_true", help="输出完整对比结构")
+    cm.add_argument("--md", type=Path, help="导出 Markdown 对比表")
 
     sm = sub.add_parser("sample", help="生成一份样例 CSV，用来试跑或给同事")
     sm.add_argument("--rows", type=int, default=2000)
@@ -200,17 +224,37 @@ def main(argv: list[str] | None = None) -> int:
             removed = prune(args.prune)
             print(f"已清理 {removed} 条，剩余 {count()} 条。")
             return 0
-        runs = list_runs(args.limit)
+        runs = list_runs(args.limit, args.offset, args.search, args.model, args.status)
         if not runs:
             print("还没有实验记录。跑一次 `flowlab demo`。")
             return 0
-        print(f"{'ID':<12} {'时间':<20} {'数据':<30} {'最佳模型':<12} {'AUC':>7}")
+        print(f"{'ID':<12} {'时间':<20} {'数据':<28} {'最佳模型':<12} {'状态':<10} {'AUC':>7}")
         for r in runs:
             auc = "—" if r["best_auc"] is None else f"{r['best_auc']:.4f}"
             print(
                 f"{r['id']:<12} {(r['created_at'] or '')[:19]:<20} "
-                f"{(r['source'] or '')[:28]:<30} {(r['best_model'] or '—'):<12} {auc:>7}"
+                f"{(r['source'] or '')[:26]:<28} {(r['best_model'] or '—'):<12} "
+                f"{(r['status'] or 'unreviewed'):<10} {auc:>7}"
             )
+            if r.get("note"):
+                print(f"{'':<12} 备注：{r['note']}")
+        return 0
+
+    if args.cmd == "annotate":
+        from flowlab.store import update_run
+
+        if args.note is None and args.status is None:
+            print("至少提供 --note 或 --status", file=sys.stderr)
+            return 2
+        try:
+            record = update_run(args.run_id, note=args.note, status=args.status)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        if record is None:
+            print(f"没有这个实验：{args.run_id}", file=sys.stderr)
+            return 2
+        print(f"已更新 {record['id']} · {record['status']} · {record['note'] or '无备注'}")
         return 0
 
     if args.cmd == "show":
@@ -235,25 +279,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "compare":
-        from flowlab.store import compare as load_runs
+        from flowlab.compare import comparison_json, load_comparison
 
-        runs = load_runs(args.run_ids)
-        if not runs:
-            print("没有找到这些实验", file=sys.stderr)
+        try:
+            comparison = load_comparison(args.run_ids)
+        except (ValueError, LookupError) as exc:
+            print(str(exc), file=sys.stderr)
             return 2
-        base = runs[0]
-        print(f"{'ID':<12} {'数据':<24} {'模型':<12} {'AUC':>8} {'相对首个':>10}")
-        for rec in runs:
-            auc = rec["best_auc"]
-            delta = (
-                ""
-                if (auc is None or base["best_auc"] is None)
-                else f"{auc - base['best_auc']:+.4f}"
-            )
+        if args.md:
+            args.md.parent.mkdir(parents=True, exist_ok=True)
+            args.md.write_text(comparison["markdown"], encoding="utf-8")
             print(
-                f"{rec['id']:<12} {(rec['source'] or '')[:22]:<24} {(rec['best_model'] or '—'):<12} "
-                f"{('—' if auc is None else f'{auc:.4f}'):>8} {delta:>10}"
+                f"Markdown 对比表：{args.md}",
+                file=sys.stderr if args.json else sys.stdout,
             )
+        if args.json:
+            print(comparison_json(comparison))
+        else:
+            print(comparison["markdown"])
         return 0
 
     if args.cmd == "score":
@@ -287,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             threshold=args.threshold,
             threshold_mode=args.threshold_mode,
+            target_fpr=args.target_fpr,
             test_size=args.test_size,
             validation_size=args.validation_size,
             ablate=args.ablate or None,
@@ -312,6 +356,7 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             threshold=args.threshold,
             threshold_mode=args.threshold_mode,
+            target_fpr=args.target_fpr,
             test_size=args.test_size,
             validation_size=args.validation_size,
             ablate=args.ablate or None,

@@ -10,7 +10,13 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import confusion_matrix
 
-from flowlab.eval.metrics import choose_threshold_f1, compute_metrics, threshold_scan
+from flowlab.eval.metrics import (
+    choose_threshold_f1,
+    choose_threshold_fpr,
+    compute_metrics,
+    curve_data,
+    threshold_scan,
+)
 from flowlab.eval.split import plan_split
 from flowlab.features.leakage import detect
 from flowlab.features.prepare import build_matrix_splits
@@ -161,10 +167,16 @@ class EvalResult:
     n_test: int = 0
     threshold: float = 0.5
     threshold_source: str = "fixed"
+    threshold_target_fpr: float | None = None
     top_flows: list[dict] = field(default_factory=list)
     score_curve: list[dict] = field(default_factory=list)
     score_curve_basis: str = "order"
     threshold_scan: list[dict] = field(default_factory=list)
+    roc_curve: list[dict] = field(default_factory=list)
+    pr_curve: list[dict] = field(default_factory=list)
+    calibration: list[dict] = field(default_factory=list)
+    brier_score: float | None = None
+    calibration_note: str = ""
     by_label: list[dict] = field(default_factory=list)
     false_positives: list[dict] = field(default_factory=list)
     false_negatives: list[dict] = field(default_factory=list)
@@ -192,7 +204,22 @@ def select_best(results: list[EvalResult]) -> EvalResult | None:
     """按验证集 AUC 选模型，测试集不参与选择。"""
     if not results:
         return None
-    return max(results, key=lambda result: selection_auc(result) or float("-inf"))
+
+    def _rank(result: EvalResult) -> float:
+        value = selection_auc(result)
+        return float("-inf") if value is None else value
+
+    return max(results, key=_rank)
+
+
+def _create_detector(name: str, seed: int):
+    """把实验种子传给模型；兼容不接受 seed 参数的第三方插件。"""
+    try:
+        return create(name, seed=seed)
+    except TypeError as exc:
+        if "seed" not in str(exc):
+            raise
+        return create(name)
 
 
 def run_experiment(
@@ -204,6 +231,7 @@ def run_experiment(
     seed: int = 42,
     threshold: float = 0.5,
     threshold_mode: str = "fixed",
+    target_fpr: float = 0.01,
     label_col: str = "label",
     explain: bool = False,
     top_k: int = 20,
@@ -218,8 +246,10 @@ def run_experiment(
         raise ValueError(f"未知模型 {unknown}，可用模型: {available()}")
     if not 0 <= threshold <= 1:
         raise ValueError("threshold 应在 0~1 之间")
-    if threshold_mode not in {"fixed", "f1"}:
-        raise ValueError("threshold_mode 只能是 fixed 或 f1")
+    if threshold_mode not in {"fixed", "f1", "fpr"}:
+        raise ValueError("threshold_mode 只能是 fixed、f1 或 fpr")
+    if not 0 < target_fpr < 1:
+        raise ValueError("target_fpr 应在 0~1 之间")
     if label_col not in df.columns:
         raise ValueError(
             f"缺少标签列 {label_col!r}。评估需要每条流都有标签；"
@@ -327,15 +357,23 @@ def run_experiment(
     results: list[EvalResult] = []
     for name in models:
         t0 = time.perf_counter()
-        det = create(name)
+        det = _create_detector(name, seed)
         det.fit(prep_tr.X, prep_tr.y)
         validation_scores = det.score(prep_val.X)
         scores = det.score(prep_te.X)
-        chosen_threshold = (
-            choose_threshold_f1(prep_val.y, validation_scores, fallback=threshold)
-            if threshold_mode == "f1"
-            else threshold
-        )
+        if threshold_mode == "f1":
+            chosen_threshold = choose_threshold_f1(
+                prep_val.y, validation_scores, fallback=threshold
+            )
+        elif threshold_mode == "fpr":
+            chosen_threshold = choose_threshold_fpr(
+                prep_val.y,
+                validation_scores,
+                target_fpr=target_fpr,
+                fallback=threshold,
+            )
+        else:
+            chosen_threshold = threshold
         validation_metrics = compute_metrics(
             prep_val.y, validation_scores, threshold=chosen_threshold
         )
@@ -347,6 +385,7 @@ def run_experiment(
             prep_te.y, (scores >= chosen_threshold).astype(int), labels=[0, 1]
         ).ravel()
         scan = threshold_scan(prep_te.y, scores)
+        curves = curve_data(prep_te.y, scores, supervised=det.kind == "supervised")
 
         top_flows: list[dict] = []
         score_curve: list[dict] = []
@@ -430,10 +469,22 @@ def run_experiment(
                 n_validation=int(len(prep_val.X)),
                 n_test=int(len(prep_te.X)),
                 threshold=round(float(chosen_threshold), 4),
-                threshold_source="validation_f1" if threshold_mode == "f1" else "fixed",
+                threshold_source=(
+                    "validation_f1"
+                    if threshold_mode == "f1"
+                    else "validation_fpr"
+                    if threshold_mode == "fpr"
+                    else "fixed"
+                ),
+                threshold_target_fpr=(target_fpr if threshold_mode == "fpr" else None),
                 top_flows=top_flows,
                 score_curve=score_curve,
                 threshold_scan=scan,
+                roc_curve=curves["roc_curve"],
+                pr_curve=curves["pr_curve"],
+                calibration=curves["calibration"],
+                brier_score=curves["brier_score"],
+                calibration_note=curves["calibration_note"],
                 score_curve_basis=curve_basis,
                 by_label=by_label,
                 false_positives=false_positives,

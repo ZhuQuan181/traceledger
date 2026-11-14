@@ -15,8 +15,9 @@ type Props = {
   validationSize: number; onValidationSize: (v: number) => void;
   seed: number; onSeed: (v: number) => void;
   threshold: number; onThreshold: (t: number) => void;
-  thresholdMode: "fixed" | "f1";
-  onThresholdMode: (mode: "fixed" | "f1") => void;
+  thresholdMode: "fixed" | "f1" | "fpr";
+  onThresholdMode: (mode: "fixed" | "f1" | "fpr") => void;
+  targetFpr: number; onTargetFpr: (value: number) => void;
   ablate: string; onAblate: (col: string) => void;
   ablationColumns: string[];
   file: File | null; onFile: (f: File | null) => void;
@@ -158,19 +159,30 @@ export function ConfigRail(p: Props) {
         <label className="inline-field">
           <span>阈值策略</span>
           <select name="threshold-mode" value={p.thresholdMode}
-                  onChange={(e) => p.onThresholdMode(e.target.value as "fixed" | "f1")}>
+                  onChange={(e) => p.onThresholdMode(e.target.value as "fixed" | "f1" | "fpr")}>
             <option value="fixed">手动阈值</option>
             <option value="f1">验证集 F1 自动</option>
+            <option value="fpr">验证集目标误报率</option>
           </select>
         </label>
         <div className="slider-row">
-          <output>{p.thresholdMode === "f1" ? "回退阈值" : "阈值"} {p.threshold.toFixed(2)}</output>
+          <output>{p.thresholdMode === "fixed" ? "阈值" : "回退阈值"} {p.threshold.toFixed(2)}</output>
           <input type="range" name="threshold" min={0.05} max={0.95} step={0.01} value={p.threshold}
-                 aria-label="判定阈值" disabled={p.thresholdMode === "f1"}
+                 aria-label="判定阈值" disabled={p.thresholdMode !== "fixed"}
                  onChange={(e) => p.onThreshold(Number(e.target.value))} />
           <span className="range-ends" aria-hidden="true">0.05</span>
           <span className="range-ends" aria-hidden="true">0.95</span>
         </div>
+        {p.thresholdMode === "fpr" && (
+          <div className="slider-row">
+            <output>目标误报率 {(p.targetFpr * 100).toFixed(1)}%</output>
+            <input type="range" name="target-fpr" min={0.001} max={0.2} step={0.001}
+                   value={p.targetFpr} aria-label="目标误报率"
+                   onChange={(e) => p.onTargetFpr(Number(e.target.value))} />
+            <span className="range-ends" aria-hidden="true">0.1%</span>
+            <span className="range-ends" aria-hidden="true">20%</span>
+          </div>
+        )}
         <label className="inline-field">
           <span>消融列</span>
           <select name="ablate" value={p.ablate} disabled={p.ablationColumns.length === 0}
@@ -189,6 +201,8 @@ export function ConfigRail(p: Props) {
         <p className="hint">
           {p.thresholdMode === "f1"
             ? "每个模型只用验证集最大化 F1 来选择阈值；测试集不参与阈值选择。"
+            : p.thresholdMode === "fpr"
+              ? "每个模型在验证集上选择满足目标误报率、召回率最高的阈值；测试集不参与选择。"
             : "阈值改动需重新运行才会更新混淆矩阵、F1 与误报率。"}
         </p>
       </section>

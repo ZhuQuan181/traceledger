@@ -31,6 +31,8 @@ function props() {
     onThreshold: vi.fn(),
     thresholdMode: "fixed" as const,
     onThresholdMode: vi.fn(),
+    targetFpr: 0.01,
+    onTargetFpr: vi.fn(),
     ablate: "",
     onAblate: vi.fn(),
     ablationColumns: [],
@@ -73,5 +75,12 @@ describe("ConfigRail", () => {
   it("shows the historical-upload notice next to the run action", () => {
     render(<ConfigRail {...props()} notice="请重新选择原文件" />);
     expect(screen.getByText("请重新选择原文件")).toBeInTheDocument();
+  });
+
+  it("exposes the validation-only target false-positive threshold", () => {
+    const p = { ...props(), thresholdMode: "fpr" as const };
+    render(<ConfigRail {...p} />);
+    expect(screen.getByRole("slider", { name: "目标误报率" })).toHaveValue("0.01");
+    expect(screen.getByText(/验证集上选择满足目标误报率/)).toBeInTheDocument();
   });
 });

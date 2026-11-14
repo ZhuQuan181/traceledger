@@ -31,6 +31,13 @@ def test_reports_mention_classes_and_features():
     assert "参与训练的特征" in p["report_md"]
     assert "类别分布" in p["report_html"]
     assert 'class="feat"' in p["report_html"]
+    assert p["dataset"]["quality"]["rows"] == p["dataset"]["rows"]
+    assert "标签质量" in p["report_md"]
+    assert "标签质量" in p["report_html"]
+    assert "排序与校准" in p["report_md"]
+    assert "Brier score" in p["report_md"]
+    assert "排序与校准" in p["report_html"]
+    assert 'class="diag-grid"' in p["report_html"]
 
 
 def test_report_uses_real_source_command_and_stable_fingerprint():
@@ -50,6 +57,12 @@ def test_report_uses_real_source_command_and_stable_fingerprint():
     assert "验证 AUC" in first["report_md"]
     assert "阈值权衡" in first["report_html"]
     assert "测试集只做最终报告" in first["report_md"]
+    from flowlab import __version__
+
+    assert first["environment"]["flowlab"] == __version__
+    assert "运行环境" in first["report_md"]
+    assert "运行环境" in first["report_html"]
+    assert "模型参数" in first["report_html"]
 
 
 def test_suspicious_badge_follows_verdict():

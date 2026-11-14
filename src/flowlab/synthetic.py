@@ -76,7 +76,9 @@ def generate(
     df = pd.DataFrame(
         {
             "Flow ID": [
-                f"2026-11-11 10:00:{i % 60:02d} 10.0.0.{i % 250}.1-10.0.0.{(i * 7) % 250}.9-{int(dst_port[i])}-6"
+                f"2026-11-11 10:00:{i % 60:02d} "
+                f"10.0.0.{i % 250}.1-10.0.0.{(i * 7) % 250}.9-"
+                f"{int(dst_port[i])}-6-{i}"
                 for i in range(n)
             ],
             "Source IP": [f"10.0.0.{int(x)}" for x in rng.integers(0, 250, n)],

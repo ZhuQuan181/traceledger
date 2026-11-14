@@ -93,6 +93,26 @@ def build_checklist(
         }
     )
 
+    quality = dataset.get("quality") or {}
+    missing_labels = int(quality.get("missing_labels") or 0)
+    conflict_groups = int(quality.get("conflict_groups") or 0)
+    duplicate_rows = int(quality.get("duplicate_rows") or 0)
+    rare_classes = quality.get("rare_classes") or []
+    quality_ok = missing_labels == 0 and conflict_groups == 0
+    quality_detail = (
+        f"缺失 {missing_labels} · 重复行 {duplicate_rows} · "
+        f"同一实体多标签 {conflict_groups} · 稀有类别 {len(rare_classes)}"
+        if quality
+        else "本次结果没有标签质量摘要"
+    )
+    items.append(
+        {
+            "item": "标签质量已检查",
+            "ok": quality_ok,
+            "detail": quality_detail,
+        }
+    )
+
     if hard_rules:
         if "time_leak" in hard_rules:
             leak_detail = "带时间戳却使用随机切分，未来样本进入了训练集；改用时间切分"

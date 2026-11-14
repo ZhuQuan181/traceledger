@@ -82,6 +82,60 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
         </section>
       ) : null}
 
+      {d?.quality && (
+        <section>
+          <h2>标签质量</h2>
+          <div className="quality-grid">
+            <div className={d.quality.missing_labels ? "warn" : "ok"}>
+              <span>缺失标签</span>
+              <strong>{d.quality.missing_labels.toLocaleString()}</strong>
+            </div>
+            <div className={d.quality.duplicate_rows ? "warn" : "ok"}>
+              <span>完全重复行</span>
+              <strong>{d.quality.duplicate_rows.toLocaleString()}</strong>
+            </div>
+            <div className={d.quality.conflict_groups ? "warn" : "ok"}>
+              <span>同一实体多标签</span>
+              <strong>{d.quality.conflict_groups.toLocaleString()}</strong>
+            </div>
+            <div className={d.quality.rare_classes.length ? "warn" : "ok"}>
+              <span>稀有类别</span>
+              <strong>{d.quality.rare_classes.length.toLocaleString()}</strong>
+            </div>
+          </div>
+          {d.quality.conflict_key && (
+            <p className="hint">
+              冲突按 {d.quality.conflict_key} 统计，涉及 {d.quality.conflict_rows.toLocaleString()} 行。
+            </p>
+          )}
+          {d.quality.rare_classes.length > 0 && (
+            <details className="feat-details">
+              <summary>
+                {d.quality.rare_classes.length} 个类别少于 {d.quality.rare_threshold} 条
+              </summary>
+              <p className="feat-chips">
+                {d.quality.rare_classes.map((row) => (
+                  <code key={row.label}>{row.label} · {row.count}</code>
+                ))}
+              </p>
+            </details>
+          )}
+          {d.quality.conflict_examples.length > 0 && (
+            <details className="feat-details">
+              <summary>查看冲突示例</summary>
+              <ul className="quality-examples">
+                {d.quality.conflict_examples.map((row) => (
+                  <li key={row.entity}>
+                    <code>{row.entity}</code>
+                    <span>{row.labels.join(" / ")}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </section>
+      )}
+
       {d && (
         <section>
           <h2>实验信息</h2>
@@ -93,6 +147,14 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
             <dt>切分</dt><dd>{d.split === "temporal" ? "时间切分"
               : d.split_requested === "temporal" ? "随机（已退化）" : "随机切分"}</dd>
             <dt>种子</dt><dd className="mono">{d.seed ?? 42}</dd>
+            <dt>判定阈值</dt><dd className="mono">
+              {d.threshold.toFixed(2)}
+              {d.threshold_source === "validation_fpr"
+                ? ` · 目标 FPR ${((d.threshold_target_fpr ?? 0) * 100).toFixed(1)}%`
+                : d.threshold_source === "validation_f1"
+                  ? " · 验证集 F1"
+                  : " · 手动"}
+            </dd>
             <dt>速率兜底</dt><dd className="mono">{d.engineering?.min_duration_ms ?? 1} ms</dd>
           </dl>
         </section>

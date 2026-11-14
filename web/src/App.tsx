@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchHistory, fetchModels, loadRun, runDemo, runUpload } from "./api";
+import {
+  fetchComparison,
+  fetchHistory,
+  fetchModels,
+  loadRun,
+  runDemo,
+  runUpload,
+} from "./api";
 import { num, pct } from "./format";
-import type { ModelInfo, Payload, RunRow } from "./types";
+import type { Comparison, ModelInfo, Payload, RunRow } from "./types";
 import { TopBar } from "./components/TopBar";
 import { ConfigRail } from "./components/ConfigRail";
 import { ContextPanel } from "./components/ContextPanel";
@@ -13,11 +20,13 @@ import { VerdictCard } from "./components/VerdictCard";
 import { ChecklistCard } from "./components/ChecklistCard";
 import { FlowPreview } from "./components/FlowPreview";
 import { InvestigationPanel } from "./components/InvestigationPanel";
-import { HistoryList } from "./components/HistoryList";
 import { ThresholdScan } from "./components/ThresholdScan";
+import { ComparePanel } from "./components/ComparePanel";
+import { DiagnosticCurves } from "./components/DiagnosticCurves";
+import { HistoryPanel } from "./components/HistoryPanel";
 
 const ALL = ["mlp", "iforest", "autoencoder"];
-type MobilePanel = "config" | "history" | "context" | null;
+type MobilePanel = "config" | "context" | null;
 
 function configSignature(config: {
   models: string[];
@@ -26,7 +35,8 @@ function configSignature(config: {
   validation_size: number;
   seed: number;
   threshold: number;
-  threshold_mode: "fixed" | "f1";
+  threshold_mode: "fixed" | "f1" | "fpr";
+  target_fpr: number;
   ablate: string | null;
   source: string;
   normal: number;
@@ -82,7 +92,8 @@ export default function App() {
   const [validationSize, setValidationSize] = useState(0.2);
   const [seed, setSeed] = useState(42);
   const [threshold, setThreshold] = useState(0.5);
-  const [thresholdMode, setThresholdMode] = useState<"fixed" | "f1">("fixed");
+  const [thresholdMode, setThresholdMode] = useState<"fixed" | "f1" | "fpr">("fixed");
+  const [targetFpr, setTargetFpr] = useState(0.01);
   const [ablate, setAblate] = useState("");
   const [ablationColumns, setAblationColumns] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
@@ -96,6 +107,12 @@ export default function App() {
   const [historyNotice, setHistoryNotice] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<MobilePanel>(null);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [comparison, setComparison] = useState<Comparison | null>(null);
+  const [compareBusy, setCompareBusy] = useState(false);
+  const [compareError, setCompareError] = useState<string | null>(null);
   const requestInFlight = useRef(false);
 
   useEffect(() => {
@@ -153,6 +170,51 @@ export default function App() {
   }, [mobilePanel]);
 
   useEffect(() => {
+    if (!compareOpen) return;
+    const previous = document.body.style.overflow;
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const dialog = document.querySelector<HTMLElement>("[data-compare-dialog]");
+    document.body.style.overflow = "hidden";
+    const focusable = () => Array.from(
+      dialog?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), ' +
+        'textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+      ) ?? []
+    ).filter((element) => element.offsetParent !== null);
+    const frame = window.requestAnimationFrame(() => {
+      (dialog?.querySelector<HTMLElement>(".compare-close") ?? focusable()[0])?.focus();
+    });
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setCompareOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !dialog) return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.body.style.overflow = previous;
+      document.removeEventListener("keydown", onKey, true);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [compareOpen]);
+
+  useEffect(() => {
     if (!busy) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
@@ -177,6 +239,60 @@ export default function App() {
     }).catch(() => setHistory([]));
   }
 
+  function openCompare() {
+    setMobilePanel(null);
+    setHistoryOpen(false);
+    setCompareError(null);
+    setCompareOpen(true);
+  }
+
+  function openHistory() {
+    setMobilePanel(null);
+    setCompareOpen(false);
+    setHistoryOpen(true);
+  }
+
+  function toggleCompare(id: string) {
+    setCompareError(null);
+    setComparison(null);
+    setCompareIds((ids) => {
+      if (ids.includes(id)) return ids.filter((value) => value !== id);
+      if (ids.length >= 4) return ids;
+      return [...ids, id];
+    });
+  }
+
+  async function runComparison() {
+    if (compareIds.length < 2 || compareIds.length > 4 || compareBusy) {
+      setCompareError("请选择 2–4 次实验。");
+      return;
+    }
+    setCompareBusy(true);
+    setCompareError(null);
+    try {
+      setComparison(await fetchComparison(compareIds));
+    } catch (e) {
+      setComparison(null);
+      setCompareError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCompareBusy(false);
+    }
+  }
+
+  function downloadComparison() {
+    if (!comparison) return;
+    const blob = new Blob([comparison.markdown], {
+      type: "text/markdown;charset=utf-8",
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `flowlab-compare-${comparison.runs.map((run) => run.id).join("-")}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(a.href), 0);
+  }
+
   const best = useMemo(() => {
     if (!payload?.results.length) return null;
     return payload.results.reduce((a, b) =>
@@ -192,6 +308,7 @@ export default function App() {
     seed,
     threshold,
     threshold_mode: thresholdMode,
+    target_fpr: targetFpr,
     ablate: ablate || null,
     source: source === "demo"
       ? `demo:${normal}:${attack}:${leaky}`
@@ -199,7 +316,7 @@ export default function App() {
     normal,
     attack,
     leaky,
-  }), [selected, split, testSize, validationSize, seed, threshold, thresholdMode, ablate, source, normal, attack, leaky, file]);
+  }), [selected, split, testSize, validationSize, seed, threshold, thresholdMode, targetFpr, ablate, source, normal, attack, leaky, file]);
 
   const resultConfig = useMemo(() => {
     const exp = payload?.experiment;
@@ -212,6 +329,7 @@ export default function App() {
       seed: exp.seed ?? 42,
       threshold: exp.threshold ?? 0.5,
       threshold_mode: exp.threshold_mode ?? "fixed",
+      target_fpr: exp.target_fpr ?? 0.01,
       ablate: exp.ablate ?? null,
       source: exp.source_kind === "demo"
         ? `demo:${exp.normal}:${exp.attack}:${Boolean(exp.leaky)}`
@@ -239,6 +357,7 @@ export default function App() {
     setSeed(exp.seed ?? 42);
     setThreshold(exp.threshold ?? 0.5);
     setThresholdMode(exp.threshold_mode ?? "fixed");
+    setTargetFpr(exp.target_fpr ?? 0.01);
     setAblate(exp.ablate ?? "");
     setNormal(exp.normal ?? 5000);
     setAttack(exp.attack ?? 500);
@@ -306,6 +425,10 @@ export default function App() {
       setError("验证集需在 0.05–0.4 之间，且验证集与测试集合计不超过 80%。");
       return;
     }
+    if (thresholdMode === "fpr" && (targetFpr <= 0 || targetFpr >= 1)) {
+      setError("目标误报率需在 0–100% 之间。");
+      return;
+    }
     requestInFlight.current = true;
     setBusy(true);
     setError(null);
@@ -315,6 +438,7 @@ export default function App() {
       const params = {
         seed, split, test_size: testSize, validation_size: validationSize, models: selected,
         threshold, threshold_mode: thresholdMode,
+        target_fpr: targetFpr,
         ablate: ablateValue || null,
       };
       const data = source === "demo"
@@ -424,27 +548,12 @@ export default function App() {
       <a className="skip" href="#main">跳到主要内容</a>
       <TopBar payload={payload} busy={busy} runs={history} activeRun={payload?.run_id}
               onOpenRun={openRun} mobilePanel={mobilePanel}
-              onOpenPanel={(panel) => setMobilePanel((current) => current === panel ? null : panel)} />
+              onOpenPanel={(panel) => setMobilePanel((current) => current === panel ? null : panel)}
+              onCompare={openCompare} onHistory={openHistory} />
 
       {mobilePanel && (
         <button className="drawer-backdrop" aria-label="关闭侧栏"
                 onClick={() => setMobilePanel(null)} />
-      )}
-
-      {mobilePanel === "history" && (
-        <aside className="mobile-history-drawer" id="history-drawer" data-drawer="history"
-               role="dialog" aria-modal="true" aria-label="最近实验">
-          <header>
-            <div>
-              <span>LOCAL HISTORY</span>
-              <h2>最近实验</h2>
-            </div>
-            <button className="drawer-close" onClick={() => setMobilePanel(null)}>关闭</button>
-          </header>
-          <HistoryList runs={history} active={payload?.run_id}
-                       onOpen={(id) => { openRun(id); }} />
-          <p className="hint">历史只保存在本机 SQLite 中；打开上传文件的记录后，需要重新选择原文件才能重跑。</p>
-        </aside>
       )}
 
       <div className="workspace">
@@ -468,6 +577,7 @@ export default function App() {
           seed={seed} onSeed={setSeed}
           threshold={threshold} onThreshold={setThreshold}
           thresholdMode={thresholdMode} onThresholdMode={setThresholdMode}
+          targetFpr={targetFpr} onTargetFpr={setTargetFpr}
           ablate={ablate} onAblate={setAblate} ablationColumns={ablationColumns}
           file={file} onFile={selectFile}
           labelsFile={labelsFile} onLabelsFile={setLabelsFile}
@@ -619,6 +729,7 @@ export default function App() {
                   rows={best.threshold_scan ?? payload.threshold_scan ?? []}
                   active={best.threshold ?? d.threshold}
                 />
+                <DiagnosticCurves result={best} />
               </section>
 
               {payload.ablation && (
@@ -672,6 +783,27 @@ export default function App() {
           mobileOpen={mobilePanel === "context"}
         />
       </div>
+
+      {compareOpen && (
+        <ComparePanel
+          selected={compareIds}
+          onToggle={toggleCompare}
+          onCompare={runComparison}
+          onClose={() => setCompareOpen(false)}
+          comparison={comparison}
+          busy={compareBusy}
+          error={compareError}
+          onDownload={downloadComparison}
+        />
+      )}
+      {historyOpen && (
+        <HistoryPanel
+          active={payload?.run_id}
+          onOpen={openRun}
+          onClose={() => setHistoryOpen(false)}
+          onChanged={refreshHistory}
+        />
+      )}
     </div>
   );
 }

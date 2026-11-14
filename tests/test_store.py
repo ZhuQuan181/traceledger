@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from copy import deepcopy
 
 from flowlab import store
 
@@ -87,6 +88,8 @@ def test_legacy_database_is_migrated_in_place(tmp_path, monkeypatch):
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)")}
         version = conn.execute("PRAGMA user_version").fetchone()[0]
     assert "validation" in columns
+    assert "note" in columns
+    assert "status" in columns
     assert version == store.SCHEMA_VERSION
 
 
@@ -96,3 +99,40 @@ def test_delete_run(tmp_path, monkeypatch):
     assert store.delete_run(run_id) is True
     assert store.delete_run(run_id) is False
     assert store.get_run(run_id) is None
+
+
+def test_history_search_filters_notes_status_and_capacity(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLOWLAB_HOME", str(tmp_path))
+    first = _payload()
+    first["dataset"]["source"] = "alpha.csv"
+    second = deepcopy(first)
+    second["dataset"]["source"] = "beta.csv"
+    second["dataset"]["hash"] = "other"
+    first_id = store.save_run(first)
+    second_id = store.save_run(second)
+
+    updated = store.update_run(
+        first_id,
+        note="baseline after removing dst_port",
+        status="baseline",
+    )
+    assert updated["note"] == "baseline after removing dst_port"
+    assert updated["status"] == "baseline"
+    assert [row["id"] for row in store.list_runs(query="dst_port")] == [first_id]
+    assert [row["id"] for row in store.list_runs(query="alpha.csv")] == [first_id]
+    assert {row["id"] for row in store.list_runs(model="stable")} == {first_id, second_id}
+    assert [row["id"] for row in store.list_runs(status="baseline")] == [first_id]
+    assert store.count_runs(status="baseline") == 1
+    assert set(store.history_models()) >= {"overfit", "stable"}
+    assert store.stats() == {"count": 2, "db_bytes": (tmp_path / "flowlab.db").stat().st_size}
+
+
+def test_history_rejects_unknown_status(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLOWLAB_HOME", str(tmp_path))
+    run_id = store.save_run(_payload())
+    try:
+        store.update_run(run_id, status="unknown")
+    except ValueError as exc:
+        assert "status" in str(exc)
+    else:
+        raise AssertionError("unknown status should be rejected")
