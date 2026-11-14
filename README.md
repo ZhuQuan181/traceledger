@@ -3,7 +3,7 @@
 > 工作名（占位，可改）。一句话：**把网络流量异常检测的研究模型，变成能跑、能复现、能解释的系统。**
 
 - 创建：2026-11-11
-- 状态：**v0.5**（2026-11-13：三栏工作台 + 8 种数据格式 + 债务清理；61 个测试）
+- 状态：**v0.5**（2026-11-14：前端视觉与交互重构；92 passed / 1 skipped）
 - 负责人：zq（实现由 Hermes 完成）
 - 文档语言：中文；代码与接口用英文
 
@@ -11,7 +11,7 @@
 
 ```bash
 # 0) 没有 uv 先装：https://docs.astral.sh/uv/getting-started/installation/
-cd /mnt/data/flowlab
+cd /mnt/data/traceledger
 uv sync --extra dev --extra api --extra data
 
 uv run flowlab sample --rows 2000          # 生成一份样例 CSV（可直接给同事）

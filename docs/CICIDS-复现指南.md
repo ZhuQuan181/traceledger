@@ -23,7 +23,7 @@ ls -lh
 ## 二、校验（不要跳过）
 
 ```bash
-cd /mnt/data/flowlab
+cd /mnt/data/traceledger
 uv run python scripts/check_dataset.py ~/data/cicids2017/Wednesday-workingHours.pcap_ISCX.csv
 ```
 

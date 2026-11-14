@@ -57,7 +57,7 @@ web/                   React + Vite（无 UI 库），设计 token 见 styles.cs
 ## 怎么跑
 
 ```bash
-cd /mnt/data/flowlab
+cd /mnt/data/traceledger
 uv sync --extra dev --extra api
 uv run flowlab demo                       # 终端跑一次
 uv run flowlab demo --report out/r.md     # 顺便出报告

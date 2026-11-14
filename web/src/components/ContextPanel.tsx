@@ -25,6 +25,19 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
         )}
       </section>
 
+      {!payload && (
+        <section className="context-map">
+          <h2>运行后生成</h2>
+          <ol>
+            <li><span>01</span><div><strong>泄漏与切分检查</strong><p>端口、ID、目标列和时间切分是否让指标虚高。</p></div></li>
+            <li><span>02</span><div><strong>数据构成</strong><p>标签分布、参与训练的特征列，以及编码后的维度。</p></div></li>
+            <li><span>03</span><div><strong>实验指纹</strong><p>数据哈希、随机种子、阈值和速率兜底参数。</p></div></li>
+            <li><span>04</span><div><strong>可离线归档的报告</strong><p>HTML 自包含，Markdown 可直接贴进实验附录。</p></div></li>
+          </ol>
+          <p className="hint">所有计算和报告都留在这台机器上。</p>
+        </section>
+      )}
+
       {d?.classes?.length ? (
         <section>
           <h2>数据构成</h2>
@@ -89,9 +102,10 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
 
       {payload && (
         <section className="export-block">
-          <h2>导出</h2>
-          <button className="wide-btn" onClick={onCopy}>{copied ? "已复制 Markdown" : "复制 Markdown"}</button>
+          <h2>导出报告</h2>
+          <button className="wide-btn primary" onClick={onDownloadHtml}>下载 HTML 报告</button>
           <button className="wide-btn" onClick={onDownloadMd}>下载 Markdown</button>
+          <button className="wide-btn" onClick={onCopy}>{copied ? "已复制 Markdown" : "复制 Markdown"}</button>
         </section>
       )}
     </aside>

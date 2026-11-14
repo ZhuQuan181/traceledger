@@ -11,6 +11,7 @@ export function TopBar({ payload, busy, runs, activeRun, onOpenRun }: {
   return (
     <header className="topbar">
       <div className="wordmark">
+        <span className="brand-sign" aria-hidden="true"><i /><i /><i /></span>
         <strong>FlowLab</strong>
         <span>流量异常检测</span>
       </div>

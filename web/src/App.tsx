@@ -11,6 +11,7 @@ import { AblationTable } from "./components/AblationTable";
 import { TopFlows } from "./components/TopFlows";
 import { VerdictCard } from "./components/VerdictCard";
 import { ChecklistCard } from "./components/ChecklistCard";
+import { FlowPreview } from "./components/FlowPreview";
 
 const ALL = ["mlp", "iforest", "autoencoder"];
 
@@ -49,6 +50,18 @@ export default function App() {
   }, [payload]);
 
   async function run(override?: { ablate?: string }) {
+    if (selected.length === 0) {
+      setError("至少选择一个模型。");
+      return;
+    }
+    if (source === "file" && !file) {
+      setError("请先选择数据文件。");
+      return;
+    }
+    if (source === "demo" && (normal < 100 || normal > 200_000 || attack < 10 || attack > 50_000)) {
+      setError("正常流需在 100–200,000 之间，攻击流需在 10–50,000 之间。");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -83,22 +96,51 @@ export default function App() {
     setSelected((s) => (s.includes(name) ? s.filter((x) => x !== name) : [...s, name]));
   }
 
+  function selectFile(next: File | null) {
+    setFile(next);
+    setLabelsFile(null);
+    setError(null);
+    if (!/\.(pkl|pickle|p)$/i.test(next?.name ?? "")) setAllowPickle(false);
+  }
+
   function save(content: string, mime: string, ext: string) {
     if (!payload) return;
     const blob = new Blob([content], { type: `${mime};charset=utf-8` });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `flowlab-${payload.dataset.hash}.${ext}`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(a.href);
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(a.href), 0);
   }
 
   async function copy() {
     if (!payload) return;
-    await navigator.clipboard.writeText(payload.report_md);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
+    setError(null);
+    try {
+      await navigator.clipboard.writeText(payload.report_md);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      const area = document.createElement("textarea");
+      area.value = payload.report_md;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      if (ok) {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1600);
+      } else {
+        setError("复制失败，请改用下载 Markdown。");
+      }
+    }
   }
+
+  const canRun = selected.length > 0 && (source === "demo" || file !== null);
 
   const d = payload?.dataset;
   // "受泄漏影响" 一律以结论卡为准：消融已排除端口时 verdict != fail，就不该再标红
@@ -121,13 +163,20 @@ export default function App() {
       <div className="workspace">
         <ConfigRail
           models={models} selected={selected} onToggleModel={toggleModel}
-          source={source} onSource={(s) => { setSource(s); setError(null); setFile(null); setLabelsFile(null); }}
+          source={source}
+          onSource={(s) => {
+            setSource(s);
+            setError(null);
+            setFile(null);
+            setLabelsFile(null);
+            setAllowPickle(false);
+          }}
           normal={normal} attack={attack} onNormal={setNormal} onAttack={setAttack}
           leaky={leaky} onLeaky={setLeaky}
           split={split} onSplit={setSplit}
           threshold={threshold} onThreshold={setThreshold}
           ablate={ablate} onAblate={setAblate}
-          file={file} onFile={setFile}
+          file={file} onFile={selectFile}
           labelsFile={labelsFile} onLabelsFile={setLabelsFile}
           allowPickle={allowPickle} onAllowPickle={setAllowPickle}
           busy={busy} onRun={() => run()} error={error}
@@ -136,22 +185,35 @@ export default function App() {
         <main className="canvas" id="main">
           {!payload && !busy && (
             <section className="intro">
-              <h1>先跑一次，<br />再谈模型。</h1>
-              <p>
-                FlowLab 把流量实验拆成四步：导入数据、审计泄漏、统一特征、对比模型。
-                每一步的输入输出都写进报告，换个人也能复现。
-              </p>
-              <ol>
-                <li>左侧已默认选好合成数据；要跑自己的数据，切到「上传文件」。</li>
-                <li>时间切分优先；带时间戳却用随机切分，会直接报时间泄漏。</li>
-                <li>选一个消融列，看指标是不是靠它撑着。</li>
-                <li>多个模型共用同一份特征矩阵，指标才真的可比。</li>
-              </ol>
-              <div className="intro-actions">
-                <button className="ghost-btn outline intro-run" onClick={() => run()}
-                        disabled={busy || selected.length === 0}>用当前配置跑一次</button>
-                {history.length > 0 && <span className="hint">或点顶部的历史实验</span>}
+              <div className="intro-copy">
+                <p className="intro-kicker"><span className="live" aria-hidden="true" />本地流量实验室</p>
+                <h1>先跑一次，<br />再谈模型。</h1>
+                <p>
+                  把流量实验拆成四步：导入数据、审计泄漏、统一特征、对比模型。
+                  每一步的输入输出都写进报告，换个人也能复现。
+                </p>
+                <div className="intro-actions">
+                  <button className="primary-action intro-run" onClick={() => run()}
+                          disabled={busy || !canRun}>
+                    {source === "file" && !file ? "先选择数据文件" : "用当前配置跑一次"}
+                  </button>
+                  {history.length > 0 && <span className="hint">或从顶部打开一次历史实验</span>}
+                </div>
+                {!canRun && (
+                  <p className="intro-warning" role="status">
+                    {source === "file" ? "上传模式需要先选择一个数据文件。" : "至少选择一个模型。"}
+                  </p>
+                )}
               </div>
+
+              <FlowPreview flows={normal + attack} threshold={threshold} />
+
+              <ol className="intro-steps">
+                <li><span>导入</span>默认合成数据；自己的数据切到「上传文件」。</li>
+                <li><span>切分</span>优先时间切分，带时间戳却随机切分会报泄漏。</li>
+                <li><span>审计</span>看消融结果，判断指标是否靠单一列撑着。</li>
+                <li><span>对比</span>多个模型共用同一份特征矩阵，指标才可比。</li>
+              </ol>
             </section>
           )}
 
@@ -167,6 +229,10 @@ export default function App() {
                   · 测试 {d.test.toLocaleString()} <span className="dot-sep">/</span>{" "}
                   {d.split === "temporal" ? "时间切分" : "随机切分"}
                 </p>
+                <div className="split-meter" aria-hidden="true">
+                  <span className="split-train" style={{ width: `${Math.round((d.train / d.rows) * 100)}%` }} />
+                  <span className="split-test" style={{ width: `${Math.round((d.test / d.rows) * 100)}%` }} />
+                </div>
 
                 <div className="verdict">
                   <div className="v-item">
