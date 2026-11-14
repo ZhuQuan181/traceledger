@@ -29,6 +29,7 @@ jobs:
       - name: Validate static site
         run: |
           test -f site/index.html
+          test -f site/en/index.html
           test -f site/styles.css
           test -f site/demo-report.html
           test -f site/assets/workspace.png

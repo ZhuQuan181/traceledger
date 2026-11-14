@@ -10,10 +10,10 @@
 
 - 创建：2026-11-11
 - 状态：**v0.5**（2026-11-14：前端视觉与交互重构；102 tests，pcap 测试需 tshark）
-- 负责人：zq（实现由 Hermes 完成）
-- 文档语言：中文；代码与接口用英文
+- 文档语言：中文为主，提供英文 README；代码与接口用英文
 - 在线项目页：https://zhuquan181.github.io/traceledger/
 - 示例报告：https://zhuquan181.github.io/traceledger/demo-report.html
+- 其他语言：[English](README.en.md)
 
 [![FlowLab 工作台截图](screens/v09-workspace.png)](https://zhuquan181.github.io/traceledger/)
 
@@ -137,7 +137,7 @@ class YourDetector(Detector):
 | 许可证 | **Apache-2.0** |
 | SPIN-OW 权重 | **不内置**，只提供接入模板 |
 | 输入格式 | **CSV + pcap 都要**（pcap 用 tshark/nDPI 离线解析） |
-| 项目执行 | **由 AI（Hermes）全程实现**，用户只做决策与验收 |
+| 项目执行 | 按里程碑推进，用户在关键节点做决策与验收 |
 
 ## 三条原则
 

@@ -139,6 +139,18 @@ dt,
   color: var(--teal);
 }
 
+.topbar nav a.lang {
+  padding: 3px 9px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  color: var(--teal);
+}
+
+.topbar nav a.lang:hover {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
 main {
   width: min(var(--max), calc(100% - 56px));
   margin: 0 auto;

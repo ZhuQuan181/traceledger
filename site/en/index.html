@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlowLab · Network Traffic Anomaly Detection Workbench</title>
+  <meta name="description" content="FlowLab is a local-first workbench for traffic anomaly detection: unified ingestion, leakage audits, model comparison, ablation, and reproducible reports.">
+  <meta name="theme-color" content="#edf1ee">
+  <meta property="og:title" content="FlowLab · Network Traffic Anomaly Detection Workbench">
+  <meta property="og:description" content="Turn traffic anomaly detection research models into systems that run, reproduce, and explain.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://zhuquan181.github.io/traceledger/en/">
+  <meta property="og:image" content="https://zhuquan181.github.io/traceledger/assets/workspace.png">
+  <link rel="alternate" hreflang="en" href="./">
+  <link rel="alternate" hreflang="zh-CN" href="../">
+  <link rel="alternate" hreflang="x-default" href="../">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to main content</a>
+
+  <header class="topbar">
+    <a class="brand" href="../" aria-label="FlowLab home">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="1" y="14" width="4" height="9"></rect>
+        <rect x="10" y="8" width="4" height="15"></rect>
+        <rect x="19" y="2" width="4" height="21"></rect>
+      </svg>
+      <strong>FlowLab</strong>
+      <span>Network traffic research workbench</span>
+    </a>
+    <nav aria-label="Main navigation">
+      <a href="#workbench">Workbench</a>
+      <a href="#workflow">Workflow</a>
+      <a href="#start">Quick start</a>
+      <a href="https://github.com/ZhuQuan181/traceledger">GitHub</a>
+      <a class="lang" href="../" hreflang="zh-CN" lang="zh-CN">中文</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="hero-copy">
+        <h1>Run it once.<br>Then talk models.</h1>
+        <p class="summary">
+          FlowLab brings CSV, pcap, and Zeek experiments into one workbench:
+          audit leakage first, split and train without contaminating the test set,
+          compare models on the same feature matrix, then write the verdict,
+          ablation, and suspicious flows into a report you can archive offline.
+        </p>
+        <div class="actions">
+          <a class="button primary" href="../demo-report.html">Open a real report</a>
+          <a class="button" href="#start">Run locally</a>
+        </div>
+        <dl class="run-record" aria-label="Project status">
+          <div><dt>Input</dt><dd>14 formats</dd></div>
+          <div><dt>Audit</dt><dd>4 leak types</dd></div>
+          <div><dt>Models</dt><dd>3 baselines</dd></div>
+          <div><dt>Tests</dt><dd>102</dd></div>
+        </dl>
+      </div>
+
+      <figure class="hero-figure">
+        <div class="figure-bar">
+          <span>RUN 44a1977407</span>
+          <span>synthetic · temporal</span>
+        </div>
+        <img src="../assets/workspace.png" width="1440" height="900"
+             alt="FlowLab workbench screenshot: experiment configuration on the left, verdict and metrics in the center, leakage and next steps on the right.">
+        <figcaption>v0.9 workbench: configuration, evidence, and next steps in one view.</figcaption>
+      </figure>
+    </section>
+
+    <section class="statement" aria-labelledby="statement-title">
+      <div>
+        <h2 id="statement-title">Good metrics are not<br>the same as trust.</h2>
+      </div>
+      <div class="statement-copy">
+        <p>
+          Ports, identifiers, target columns, and temporal splits can all leak the answer
+          into the feature matrix. FlowLab checks for the things that inflate metrics
+          before training starts. Split, leakage, ablation, and sample size all feed
+          the same final verdict.
+        </p>
+        <ul class="invariants">
+          <li><strong>Labels never enter features</strong><span>Label and identifier columns are dropped before training.</span></li>
+          <li><strong>Preprocessing is fitted on training data only</strong><span>Test-set statistics never leak backward.</span></li>
+          <li><strong>Same data and seed produce identical output</strong><span>Results, fingerprints, and reports reproduce.</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="workbench" id="workbench" aria-labelledby="workbench-title">
+      <header class="section-head">
+        <h2 id="workbench-title">Not a dashboard.<br>A lab ledger.</h2>
+        <p>Every judgment can be traced back to data, features, and parameters, without relying on a polished overview chart.</p>
+      </header>
+      <div class="workbench-grid">
+        <figure class="detail-figure">
+          <img src="../assets/intro.png" width="1440" height="900" loading="lazy"
+               alt="FlowLab landing screen: local traffic lab, score trace preview, and four-step workflow.">
+          <figcaption>The first run already produces a synthetic experiment with leakage checks.</figcaption>
+        </figure>
+        <dl class="ledger">
+          <div>
+            <dt>Setup</dt>
+            <dd>Data source, temporal or random split, models, threshold, and ablation column. After an upload, the ablation list is populated from the features actually used.</dd>
+          </div>
+          <div>
+            <dt>Evidence</dt>
+            <dd>AUC, F1, false-positive rate, confusion matrix, score curve, class distribution, and the exact feature list used in training.</dd>
+          </div>
+          <div>
+            <dt>Verdict</dt>
+            <dd>The verdict card, checklist, and warning badges share one source of truth, so the Web UI and reports cannot contradict each other.</dd>
+          </div>
+          <div>
+            <dt>Next step</dt>
+            <dd>Rerun without a leaking column, test an ablation, inspect the most suspicious flows, or export HTML / Markdown.</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="workflow" id="workflow" aria-labelledby="workflow-title">
+      <header class="section-head">
+        <h2 id="workflow-title">Four steps from experiment to evidence.</h2>
+        <p>Every step has explicit inputs and outputs. Someone else can rerun it from the command and dataset fingerprint.</p>
+      </header>
+      <ol class="steps">
+        <li>
+          <span class="step-no">01</span>
+          <div><h3>Ingest</h3><p>CSV, pcap, Zeek conn.log, parquet, npz, Excel, and other formats: 14 entry points in total.</p></div>
+          <code>flowlab run flows.csv</code>
+        </li>
+        <li>
+          <span class="step-no">02</span>
+          <div><h3>Audit</h3><p>Check identifier, port, and target leakage, plus temporal leakage introduced by random splits.</p></div>
+          <code>--ablate dst_port</code>
+        </li>
+        <li>
+          <span class="step-no">03</span>
+          <div><h3>Compare</h3><p>MLP, Isolation Forest, and AutoEncoder share the same feature matrix and threshold.</p></div>
+          <code>--models mlp,iforest,autoencoder</code>
+        </li>
+        <li>
+          <span class="step-no">04</span>
+          <div><h3>Archive</h3><p>The report records dataset fingerprint, seed, split, features, metrics, and suspicious flows.</p></div>
+          <code>--html out/report.html</code>
+        </li>
+      </ol>
+    </section>
+
+    <section class="report-band" aria-labelledby="report-title">
+      <div class="report-copy">
+        <h2 id="report-title">A report is more than screenshots.</h2>
+        <p>
+          One payload drives the Web UI, Markdown, and standalone HTML.
+          Whoever receives the report can see why the verdict holds and rerun
+          the experiment from the fingerprint and command. The sample report is
+          currently generated in Chinese.
+        </p>
+        <a class="report-link" href="../demo-report.html">Open the generated sample report</a>
+      </div>
+      <div class="report-sample" aria-label="Leakage-check excerpt from the sample report">
+        <div class="sample-bar"><span>demo-report.html</span><span>standalone</span></div>
+        <pre><code><span class="code-muted"># verdict</span>
+<span class="code-warn">Fix leakage before trusting metrics</span>
+
+<span class="code-muted"># checks</span>
+port_leak  95.2% of DDoS flows use 3333
+verdict    metrics are not usable as evidence
+
+<span class="code-muted"># reproduce</span>
+flowlab demo --report out/report.md</code></pre>
+      </div>
+    </section>
+
+    <section class="start" id="start" aria-labelledby="start-title">
+      <div class="start-copy">
+        <h2 id="start-title">Run local.<br>Keep the data local.</h2>
+        <p>
+          The Web workbench is served by a local Python process. Reports and
+          experiment history stay on the machine. GitHub Pages hosts only this
+          introduction and a static sample report.
+        </p>
+        <a class="text-link" href="https://github.com/ZhuQuan181/traceledger">View source and documentation</a>
+      </div>
+      <div class="terminal">
+        <div class="terminal-bar"><span>terminal</span><span>zsh</span></div>
+        <pre><code><span class="code-muted">$</span> git clone https://github.com/ZhuQuan181/traceledger.git
+<span class="code-muted">$</span> cd traceledger
+<span class="code-muted">$</span> uv sync --extra dev --extra api --extra data
+<span class="code-muted">$</span> uv run flowlab demo
+<span class="code-muted">$</span> uv run flowlab serve
+
+<span class="code-ok">→</span> http://127.0.0.1:8765</code></pre>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>FlowLab</strong>
+      <span>Local-first traffic anomaly detection workbench</span>
+    </div>
+    <div class="footer-meta">
+      <span>Apache-2.0</span>
+      <a href="https://github.com/ZhuQuan181/traceledger/blob/master/docs/ARCHITECTURE.md">Architecture</a>
+      <a href="https://github.com/ZhuQuan181/traceledger">GitHub</a>
+      <a href="../" hreflang="zh-CN" lang="zh-CN">中文</a>
+    </div>
+  </footer>
+</body>
+</html>
