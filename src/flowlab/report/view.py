@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from flowlab.eval.runner import EvalResult
+from flowlab.eval.runner import EvalResult, select_best
 
 KIND_CN = {"supervised": "监督", "unsupervised": "无监督"}
 
@@ -25,12 +25,14 @@ def fmt_pct(v, digits: int = 2) -> str:
 class ModelRow:
     model: str
     kind_cn: str
+    validation_auc: str
     auc: str
     pr_auc: str
     f1: str
     precision: str
     recall: str
     fpr: str
+    threshold: str
     duration: str
     tp: str
     fp: str
@@ -47,14 +49,20 @@ class ReportView:
     hash: str
     rows: int
     train: int
+    validation: int
     test: int
     attack_train: int
+    attack_validation: int
     attack_test: int
     split: str
     split_requested: str
     split_fallback: bool
+    split_diagnostics: dict
+    generalization: str
     seed: int
     threshold: str
+    threshold_mode: str
+    threshold_source: str
     labels_mode: str
     labels_labelled: int
     labels_total: int
@@ -70,6 +78,8 @@ class ReportView:
     warnings: list[dict]
     flows: list[dict]
     curve: list[dict]
+    curve_basis: str
+    threshold_scan: list[dict]
     ablation: dict | None
     small_test: bool
     leak_count: int
@@ -111,7 +121,7 @@ def build_view(
     results: list[EvalResult], warns: list[dict], meta: dict, ablation: dict | None = None
 ) -> ReportView:
     r0 = results[0] if results else None
-    best = max(results, key=lambda r: r.metrics.get("auc") or 0) if results else None
+    best = select_best(results)
     m = best.metrics if best else {}
     lab = meta.get("labels") or {}
     eng = meta.get("engineering") or {}
@@ -123,12 +133,14 @@ def build_view(
         ModelRow(
             model=r.model,
             kind_cn=KIND_CN.get(r.kind, r.kind),
+            validation_auc=fmt_num((r.validation_metrics or {}).get("auc")),
             auc=fmt_num(r.metrics.get("auc")),
             pr_auc=fmt_num(r.metrics.get("pr_auc")),
             f1=fmt_num(r.metrics.get("f1")),
             precision=fmt_num(r.metrics.get("precision")),
             recall=fmt_num(r.metrics.get("recall")),
             fpr=fmt_pct(r.metrics.get("fpr")),
+            threshold=f"{r.threshold:.2f}",
             duration=f"{r.duration_s:.2f}s",
             tp=f"{r.confusion['tp']:,}",
             fp=f"{r.confusion['fp']:,}",
@@ -146,16 +158,28 @@ def build_view(
         hash=r0.dataset_hash if r0 else "",
         rows=int(meta.get("rows", 0)),
         train=r0.n_train if r0 else 0,
+        validation=r0.n_validation if r0 else 0,
         test=r0.n_test if r0 else 0,
         attack_train=r0.attack_train if r0 else 0,
+        attack_validation=r0.attack_validation if r0 else 0,
         attack_test=(m.get("attack_support") or 0) if best else 0,
         split=r0.split if r0 else "temporal",
         split_requested=(exp.get("split") or (r0.split_requested if r0 else "temporal")),
         split_fallback=bool(
             exp.get("split") == "temporal" and r0 is not None and r0.split != "temporal"
         ),
+        split_diagnostics=(r0.split_diagnostics if r0 else {}),
+        generalization=(
+            "未来时间外推"
+            if r0 and r0.split == "temporal"
+            else "未见实体泛化"
+            if r0 and r0.split == "group"
+            else "同分布随机泛化"
+        ),
         seed=r0.seed if r0 else 42,
-        threshold=f"{r0.threshold:.2f}" if r0 else "0.50",
+        threshold=f"{best.threshold:.2f}" if best else "0.50",
+        threshold_mode=str(exp.get("threshold_mode") or "fixed"),
+        threshold_source=(best.threshold_source if best else "fixed"),
         labels_mode=lab.get("mode", "embedded"),
         labels_labelled=int(lab.get("labelled", 0) or 0),
         labels_total=int(lab.get("total", 0) or 0),
@@ -171,6 +195,8 @@ def build_view(
         warnings=warns,
         flows=(best.top_flows if best else [])[:15],
         curve=(best.score_curve if best else []),
+        curve_basis=(best.score_curve_basis if best else "order"),
+        threshold_scan=(best.threshold_scan if best else []),
         ablation=ablation,
         small_test=bool(r0 and r0.n_test < 50),
         leak_count=len(warns),

@@ -6,6 +6,17 @@ from flowlab.eval.runner import EvalResult
 from flowlab.report.view import ReportView, build_view
 
 
+def _cell(value) -> str:
+    """Markdown 表格单元格只做必要转义，避免标签/主机名破坏列结构。"""
+    return (
+        str(value if value is not None else "—")
+        .replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("\r", " ")
+        .replace("\n", "<br>")
+    )
+
+
 def _meta_table(v: ReportView) -> str:
     split = v.split
     if v.split_fallback:
@@ -16,13 +27,23 @@ def _meta_table(v: ReportView) -> str:
         split = "分层随机切分"
     rows = [
         ("数据来源", f"{v.source}（{v.fmt}）"),
-        ("样本量", f"{v.rows}（训练 {v.train} / 测试 {v.test}）"),
-        ("攻击样本", f"训练 {v.attack_train} / 测试 {v.attack_test}"),
+        ("样本量", f"{v.rows}（训练 {v.train} / 验证 {v.validation} / 测试 {v.test}）"),
+        (
+            "攻击样本",
+            f"训练 {v.attack_train} / 验证 {v.attack_validation} / 测试 {v.attack_test}",
+        ),
         ("数据指纹", f"`{v.hash}`"),
         ("实验指纹", f"`{v.experiment_fingerprint}`"),
         ("切分方式", split),
+        ("泛化场景", v.generalization),
         ("随机种子", str(v.seed)),
-        ("判定阈值", v.threshold),
+        (
+            "判定阈值",
+            f"{v.threshold}（"
+            + ("验证集 F1 自动选择" if v.threshold_source == "validation_f1" else "人工指定")
+            + "）",
+        ),
+        ("模型选择", "验证集 AUC（测试集只做最终报告）"),
         (
             "标签对齐",
             f"{v.labels_mode}（{v.labels_labelled}/{v.labels_total}）"
@@ -31,7 +52,9 @@ def _meta_table(v: ReportView) -> str:
         ),
         ("速率兜底", f"{v.min_duration_ms} ms"),
     ]
-    return "| 项 | 值 |\n|---|---|\n" + "\n".join(f"| {k} | {val} |" for k, val in rows)
+    return "| 项 | 值 |\n|---|---|\n" + "\n".join(
+        f"| {_cell(k)} | {_cell(val)} |" for k, val in rows
+    )
 
 
 def _classes_line(v: ReportView) -> str:
@@ -56,23 +79,40 @@ def _warn_table(warns: list[dict]) -> str:
     out = ["| 严重度 | 规则 | 涉及列 | 说明 | 建议 |", "|---|---|---|---|---|"]
     for w in warns:
         out.append(
-            f"| {w['severity']} | `{w['rule']}` | {', '.join(map(str, w['columns']))} | "
-            f"{w['message']} | {w['suggestion']} |"
+            f"| {_cell(w['severity'])} | `{_cell(w['rule'])}` | "
+            f"{_cell(', '.join(map(str, w['columns'])))} | "
+            f"{_cell(w['message'])} | {_cell(w['suggestion'])} |"
         )
     return "\n".join(out) + "\n"
 
 
 def _model_table(v: ReportView) -> str:
-    head = (
-        "| 模型 | 类型 | AUC | PR-AUC | F1 | 精确率 | 召回率 | 误报率 | 耗时 | TP | FP | FN | TN |"
-    )
-    sep = "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    head = "| 模型 | 类型 | 验证 AUC | 测试 AUC | 测试 PR-AUC | 测试 F1 | 精确率 | 召回率 | 误报率 | 阈值 | 耗时 | TP | FP | FN | TN |"
+    sep = "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"
     rows = [
-        f"| {m.model}{' 🏆' if m.is_best else ''} | {m.kind_cn} | {m.auc} | {m.pr_auc} | {m.f1} | {m.precision} | "
-        f"{m.recall} | {m.fpr} | {m.duration} | {m.tp} | {m.fp} | {m.fn} | {m.tn} |"
+        f"| {_cell(m.model)}{' 🏆' if m.is_best else ''} | {_cell(m.kind_cn)} | {m.validation_auc} | {m.auc} | {m.pr_auc} | {m.f1} | {m.precision} | "
+        f"{m.recall} | {m.fpr} | {m.threshold} | {m.duration} | {m.tp} | {m.fp} | {m.fn} | {m.tn} |"
         for m in v.models
     ]
     return "\n".join([head, sep, *rows])
+
+
+def _threshold_table(v: ReportView) -> str:
+    if not v.threshold_scan:
+        return ""
+    rows = ["| 阈值 | 精确率 | 召回率 | F1 | 误报率 |", "|---|---|---|---|---|"]
+    for row in v.threshold_scan:
+        fpr = "—" if row.get("fpr") is None else f"{row['fpr']:.2%}"
+        rows.append(
+            f"| {row['threshold']:.2f} | {row['precision']:.4f} | "
+            f"{row['recall']:.4f} | {row['f1']:.4f} | {fpr} |"
+        )
+    return (
+        "### 阈值权衡（测试集诊断）\n\n"
+        + "\n".join(rows)
+        + "\n\n> 该扫描只用于展示部署权衡，不能拿测试集挑阈值；"
+        "自动阈值只使用验证集。\n"
+    )
 
 
 def _ablation_block(v: ReportView, section: int) -> str:
@@ -97,8 +137,9 @@ def _flows_block(v: ReportView) -> str:
     if not v.flows:
         return ""
     rows = [
-        f"| {f.get('src_ip', '—')} | {f.get('dst_ip', '—')} | {f.get('dst_port', '—')} | "
-        f"{f.get('protocol', '—')} | {f.get('score', '—')} | {f.get('label', '—')} |"
+        f"| {_cell(f.get('src_ip', '—'))} | {_cell(f.get('dst_ip', '—'))} | "
+        f"{_cell(f.get('dst_port', '—'))} | {_cell(f.get('protocol', '—'))} | "
+        f"{_cell(f.get('score', '—'))} | {_cell(f.get('label', '—'))} |"
         for f in v.flows
     ]
     return (
@@ -109,8 +150,9 @@ def _flows_block(v: ReportView) -> str:
 
 def _error_rows(rows: list[dict]) -> list[str]:
     return [
-        f"| {r.get('src_ip', '—')} | {r.get('dst_ip', '—')} | {r.get('dst_port', '—')} | "
-        f"{r.get('score', '—')} | {r.get('label', '—')} |"
+        f"| {_cell(r.get('src_ip', '—'))} | {_cell(r.get('dst_ip', '—'))} | "
+        f"{_cell(r.get('dst_port', '—'))} | {_cell(r.get('score', '—'))} | "
+        f"{_cell(r.get('label', '—'))} |"
         for r in rows
     ]
 
@@ -130,7 +172,7 @@ def _investigation_block(v: ReportView) -> str:
             measure = "误报率" if row.get("kind") == "benign" else "召回率"
             rate = "—" if row.get("rate") is None else f"{row['rate']:.2%}"
             out.append(
-                f"| {row.get('label')} | {measure} | {int(row.get('total', 0)):,} | "
+                f"| {_cell(row.get('label'))} | {measure} | {int(row.get('total', 0)):,} | "
                 f"{int(row.get('flagged', 0)):,} | {rate} |"
             )
         out.append("")
@@ -143,7 +185,7 @@ def _investigation_block(v: ReportView) -> str:
         ]
         for row in v.source_ranking:
             out.append(
-                f"| {row.get('src_ip')} | {int(row.get('alerts', 0)):,} | "
+                f"| {_cell(row.get('src_ip'))} | {int(row.get('alerts', 0)):,} | "
                 f"{int(row.get('true_attacks', 0)):,} | {int(row.get('false_alarms', 0)):,} | "
                 f"{row.get('max_score', '—')} |"
             )
@@ -232,9 +274,15 @@ def render_report(
         _warn_table(v.warnings),
         "## 3. 模型对比",
         "",
+        "> 最佳模型只按验证集 AUC 选择；下表主指标均来自未参与选择与调参的测试集。",
+        "",
         _model_table(v),
         "",
+        _threshold_table(v),
+        "",
         "## 4. 混淆矩阵",
+        "",
+        "> 混淆矩阵对应测试集与报告中的判定阈值。",
         "",
         "| 模型 | TN | FP | FN | TP |",
         "|---|---|---|---|---|",

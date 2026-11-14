@@ -33,3 +33,10 @@ def test_invalid_ablation_returns_clean_error(capsys):
     assert code == 2
     assert "实验失败" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_serve_refuses_public_bind_without_explicit_opt_in(capsys):
+    code = main(["serve", "--host", "0.0.0.0"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "--allow-remote" in captured.err

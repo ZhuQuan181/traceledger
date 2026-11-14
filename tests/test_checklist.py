@@ -59,6 +59,14 @@ def test_dropped_id_leak_does_not_contradict_passing_verdict():
     assert item["ok"] is True
 
 
+def test_time_leak_blocks_even_when_timestamp_is_not_a_feature():
+    leak = {"rule": "time_leak", "columns": ["timestamp"]}
+    items = build_checklist(_ds(split="random"), [leak], {"column": "dst_port", "rows": []})
+    item = next(i for i in items if i["item"] == "硬泄漏已排除")
+    assert item["ok"] is False
+    assert "随机切分" in item["detail"]
+
+
 def test_unresolved_leak_blocks_even_if_not_hard():
     """端口泄漏把结论判成不可用时，清单不能显示全部通过。"""
     items = build_checklist(

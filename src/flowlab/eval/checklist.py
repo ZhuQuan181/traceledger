@@ -31,7 +31,12 @@ def build_checklist(
     hard_rules = {
         w["rule"]
         for w in warnings
-        if w.get("rule") in hard and (not used or any(str(c) in used for c in w.get("columns", [])))
+        if w.get("rule") in hard
+        and (
+            w["rule"] == "time_leak"
+            or not used
+            or any(str(c) in used for c in w.get("columns", []))
+        )
     }
     rules = {w["rule"] for w in warnings}
 
@@ -41,11 +46,31 @@ def build_checklist(
         {
             "item": "按时间切分",
             "ok": split == "temporal",
-            "detail": "时间切分"
-            if split == "temporal"
-            else "用了随机切分：若数据带时间戳，测试集的『未来』会进训练集",
+            "detail": (
+                "时间切分"
+                if split == "temporal"
+                else "按实体分组：可评估新实体泛化，但不能声称时间外推"
+                if split == "group"
+                else "用了随机切分：若数据带时间戳，测试集的『未来』会进训练集"
+            ),
         }
     )
+
+    diagnostics = dataset.get("split_diagnostics") or {}
+    duplicate_cross = diagnostics.get("duplicate_cross") or {}
+    entity_overlap = diagnostics.get("entity_overlap") or {}
+    overlap_ok = not any(duplicate_cross.values()) and (
+        split == "group" or not any(entity_overlap.values())
+    )
+    entity_key = diagnostics.get("entity_key") or "实体"
+    overlap_detail = (
+        "未发现跨集重复行或实体重叠"
+        if overlap_ok
+        else "存在跨集重复行"
+        if any(duplicate_cross.values())
+        else f"同一 {entity_key} 出现在多个子集；若要外推到新实体，请分组切分"
+    )
+    items.append({"item": "重复与实体重叠已检查", "ok": overlap_ok, "detail": overlap_detail})
 
     items.append(
         {
@@ -69,10 +94,11 @@ def build_checklist(
     )
 
     if hard_rules:
-        leak_ok, leak_detail = (
-            False,
-            "有效特征命中 " + "、".join(sorted(hard_rules)) + "，修完再投稿",
-        )
+        if "time_leak" in hard_rules:
+            leak_detail = "带时间戳却使用随机切分，未来样本进入了训练集；改用时间切分"
+        else:
+            leak_detail = "有效特征命中 " + "、".join(sorted(hard_rules)) + "，修完再投稿"
+        leak_ok = False
     elif unresolved_leak:
         leak_ok = False
         hint = "、".join(sorted(rules)) or "泄漏"

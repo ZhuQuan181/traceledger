@@ -22,7 +22,7 @@ from flowlab import __version__
 from flowlab.models.registry import available
 from flowlab.pipeline import load_frame
 from flowlab.service import ExperimentSpec, demo_frame, execute
-from flowlab.store import get_run, list_runs, save_run
+from flowlab.store import delete_run, get_run, list_runs, save_run
 
 app = FastAPI(title="FlowLab", version=__version__)
 
@@ -130,12 +130,14 @@ class DemoRequest(BaseModel):
     normal: int = Field(5000, ge=100, le=200_000)
     attack: int = Field(500, ge=10, le=50_000)
     seed: int = Field(42, ge=0, le=2**32 - 1)
-    split: Literal["temporal", "random"] = "temporal"
+    split: Literal["temporal", "random", "group"] = "temporal"
     test_size: float = Field(0.3, ge=0.05, le=0.5)
+    validation_size: float = Field(0.2, ge=0.05, le=0.4)
     models: list[str] = Field(
         default_factory=lambda: ["mlp", "iforest", "autoencoder"], min_length=1
     )
     threshold: float = Field(0.5, ge=0, le=1)
+    threshold_mode: Literal["fixed", "f1"] = "fixed"
     ablate: str | None = None
     leaky: bool = False
     save: bool = True
@@ -183,7 +185,9 @@ def demo(req: DemoRequest):
         split=req.split,
         seed=req.seed,
         threshold=req.threshold,
+        threshold_mode=req.threshold_mode,
         test_size=req.test_size,
+        validation_size=req.validation_size,
         ablate=req.ablate,
         source_kind="demo",
         normal=req.normal,
@@ -207,8 +211,10 @@ async def upload(
     split: str = Form("temporal"),
     models: str = Form("mlp,iforest,autoencoder"),
     threshold: float = Form(0.5),
+    threshold_mode: str = Form("fixed"),
     seed: int = Form(42),
     test_size: float = Form(0.3),
+    validation_size: float = Form(0.2),
     ablate: str = Form(""),
     allow_pickle: bool = Form(False),
     save: bool = Form(True),
@@ -216,12 +222,18 @@ async def upload(
 ):
     mlist = [m.strip() for m in models.split(",") if m.strip()]
     _validate(mlist)
-    if split not in {"temporal", "random"}:
-        raise HTTPException(400, "split 只能是 temporal 或 random")
+    if split not in {"temporal", "random", "group"}:
+        raise HTTPException(400, "split 只能是 temporal、random 或 group")
     if not 0 <= threshold <= 1:
         raise HTTPException(400, "threshold 应在 0~1 之间")
+    if threshold_mode not in {"fixed", "f1"}:
+        raise HTTPException(400, "threshold_mode 只能是 fixed 或 f1")
     if not 0.05 <= test_size <= 0.5:
         raise HTTPException(400, "test_size 应在 0.05~0.5 之间")
+    if not 0.05 <= validation_size <= 0.4:
+        raise HTTPException(400, "validation_size 应在 0.05~0.4 之间")
+    if test_size + validation_size > 0.8:
+        raise HTTPException(400, "test_size + validation_size 不能超过 0.8")
     if not 0 <= seed <= 2**32 - 1:
         raise HTTPException(400, "seed 超出允许范围")
     if allow_pickle:
@@ -268,7 +280,9 @@ async def upload(
         split=split,
         seed=seed,
         threshold=threshold,
+        threshold_mode=threshold_mode,
         test_size=test_size,
+        validation_size=validation_size,
         ablate=ablate or None,
         source_kind="upload",
         source_ref=name,
@@ -314,6 +328,13 @@ def history_item(run_id: str):
     payload = rec["payload"]
     payload["run_id"] = rec["id"]
     return payload
+
+
+@app.delete("/api/history/{run_id}")
+def history_delete(run_id: str):
+    if not delete_run(run_id):
+        raise HTTPException(404, "没有这次实验")
+    return {"deleted": run_id}
 
 
 @app.get("/api/history/{run_id}/report.html", response_class=HTMLResponse)

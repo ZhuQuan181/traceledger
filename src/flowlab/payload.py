@@ -9,7 +9,7 @@ from datetime import datetime
 import pandas as pd
 
 from flowlab.eval.checklist import build_checklist
-from flowlab.eval.runner import EvalResult
+from flowlab.eval.runner import EvalResult, select_best, selection_auc
 from flowlab.eval.verdict import judge
 from flowlab.report.html import render_html
 from flowlab.report.markdown import render_report
@@ -27,7 +27,19 @@ def _experiment_fingerprint(
     core = {
         "dataset": {
             key: dataset.get(key)
-            for key in ("hash", "rows", "train", "test", "split", "seed", "threshold")
+            for key in (
+                "hash",
+                "rows",
+                "train",
+                "validation",
+                "test",
+                "split",
+                "seed",
+                "threshold",
+                "threshold_mode",
+                "threshold_source",
+                "selection",
+            )
         },
         "results": stable_results,
         "warnings": warns,
@@ -60,21 +72,39 @@ def build_payload(
 ) -> dict:
     meta = dict(meta or {})
     r0 = results[0] if results else None
-    best = max(results, key=lambda r: r.metrics.get("auc") or 0) if results else None
+    best = select_best(results)
 
     dataset = {
         "source": source,
         "rows": int(len(df)),
         "train": r0.n_train if r0 else 0,
+        "validation": r0.n_validation if r0 else 0,
         "test": r0.n_test if r0 else 0,
         "hash": r0.dataset_hash if r0 else "",
         "split": r0.split if r0 else "",
         "split_requested": r0.split_requested if r0 else "",
         "split_fallback": bool(r0 and r0.split_requested == "temporal" and r0.split != "temporal"),
-        "threshold": r0.threshold if r0 else 0.5,
+        "split_diagnostics": r0.split_diagnostics if r0 else {},
+        "generalization": (
+            "未来时间外推"
+            if r0 and r0.split == "temporal"
+            else "未见实体泛化"
+            if r0 and r0.split == "group"
+            else "同分布随机泛化"
+        ),
+        "threshold": best.threshold if best else 0.5,
+        "threshold_mode": meta.get("threshold_mode")
+        or (meta.get("experiment") or {}).get("threshold_mode", "fixed"),
+        "threshold_source": best.threshold_source if best else "fixed",
         "seed": r0.seed if r0 else 42,
         "attack_train": r0.attack_train if r0 else 0,
+        "attack_validation": r0.attack_validation if r0 else 0,
         "attack_test": r0.metrics.get("attack_support", 0) if r0 else 0,
+        "selection": {
+            "rule": "validation_auc",
+            "validation_auc": selection_auc(best) if best else None,
+            "test_auc": best.metrics.get("auc") if best else None,
+        },
         "labels": meta.get("labels", {}),
         "engineering": meta.get("engineering", {}),
         "format": meta.get("format", {}),
@@ -137,8 +167,11 @@ def build_payload(
         "warnings": warns,
         "results": result_dicts,
         "best_model": best.model if best else None,
+        "best_model_selection": "validation_auc",
         "top_flows": best.top_flows if best else [],
         "score_curve": best.score_curve if best else [],
+        "score_curve_basis": best.score_curve_basis if best else "order",
+        "threshold_scan": best.threshold_scan if best else [],
         "investigation": {
             "by_label": best.by_label if best else [],
             "false_positives": best.false_positives if best else [],

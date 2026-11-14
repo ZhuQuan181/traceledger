@@ -46,6 +46,10 @@ def test_report_uses_real_source_command_and_stable_fingerprint():
     assert "报告含生成时间，文件字节不保证完全相同" in first["report_md"]
     assert "PR-AUC" in first["report_html"]
     assert 'class="table-scroll"' in first["report_html"]
+    assert "验证集最佳" in first["report_html"]
+    assert "验证 AUC" in first["report_md"]
+    assert "阈值权衡" in first["report_html"]
+    assert "测试集只做最终报告" in first["report_md"]
 
 
 def test_suspicious_badge_follows_verdict():

@@ -170,9 +170,9 @@ def _signal(v: ReportView) -> str:
         f'<div><div class="signal">{bars}'
         f'<div class="thr" style="bottom:{threshold * 100:.0f}%"><span>阈值 {threshold:.2f}</span></div>'
         f"</div></div></div>"
-        f'<div class="cap"><span>窗口 1</span>'
+        f'<div class="cap"><span>{"按时间排序" if v.curve_basis == "time" else "按测试样本顺序"}</span>'
         f"<span>柱高＝该窗最高分；红色柱＝窗内 ≥20% 的流超阈值（{hits_n}/{len(v.curve)}）</span>"
-        f"<span>窗口 {len(v.curve)}</span></div>"
+        f"<span>共 {len(v.curve)} 个窗口</span></div>"
     )
 
 
@@ -195,10 +195,13 @@ def render_html(
         f'<tr class="{"best" if m.is_best else ""}">'
         f'<th scope="row" class="mono">{_e(m.model)}'
         f"{best_tag if m.is_best else ''}</th>"
-        f'<td class="muted">{_e(m.kind_cn)}</td><td class="num">{_e(m.auc)}</td>'
+        f'<td class="muted">{_e(m.kind_cn)}</td>'
+        f'<td class="num">{_e(m.validation_auc)}</td>'
+        f'<td class="num">{_e(m.auc)}</td>'
         f'<td class="num">{_e(m.pr_auc)}</td>'
         f'<td class="num">{_e(m.f1)}</td><td class="num">{_e(m.precision)}</td>'
         f'<td class="num">{_e(m.recall)}</td><td class="num">{_e(m.fpr)}</td>'
+        f'<td class="num">{_e(m.threshold)}</td>'
         f'<td class="num muted">{_e(m.duration)}</td>'
         f'<td class="num">{_e(m.tp)}</td><td class="num bad">{_e(m.fp)}</td>'
         f'<td class="num bad">{_e(m.fn)}</td><td class="num">{_e(m.tn)}</td></tr>'
@@ -214,6 +217,24 @@ def render_html(
             for w in v.warnings
         )
         or '<p class="cap">未检测到明显的数据泄漏。</p>'
+    )
+
+    threshold_rows = "".join(
+        f'<tr><td class="num">{row["threshold"]:.2f}</td>'
+        f'<td class="num">{_e(_fmt(row.get("precision"), 4))}</td>'
+        f'<td class="num">{_e(_fmt(row.get("recall"), 4))}</td>'
+        f'<td class="num">{_e(_fmt(row.get("f1"), 4))}</td>'
+        f'<td class="num">{_e(_fmt(None if row.get("fpr") is None else row["fpr"] * 100, 2)) + "%" if row.get("fpr") is not None else "—"}</td></tr>'
+        for row in v.threshold_scan
+    )
+    threshold_html = (
+        "<h3>阈值权衡（测试集诊断）</h3>"
+        '<div class="table-scroll"><table class="data"><thead><tr><th>阈值</th>'
+        '<th class="num">精确率</th><th class="num">召回率</th><th class="num">F1</th>'
+        f'<th class="num">误报率</th></tr></thead><tbody>{threshold_rows}</tbody></table></div>'
+        '<p class="cap">该扫描只用于展示部署权衡，不能拿测试集挑阈值；自动阈值只使用验证集。</p>'
+        if threshold_rows
+        else ""
     )
 
     flow_rows = "".join(
@@ -313,13 +334,26 @@ def render_html(
         f"<tr><th>{k}</th><td>{val}</td></tr>"
         for k, val in [
             ("数据来源", f"{_e(v.source)}（{_e(v.fmt)}）"),
-            ("样本量", f"{v.rows}（训练 {v.train} / 测试 {v.test}）"),
-            ("攻击样本", f"训练 {v.attack_train} / 测试 {v.attack_test}"),
+            (
+                "样本量",
+                f"{v.rows}（训练 {v.train} / 验证 {v.validation} / 测试 {v.test}）",
+            ),
+            (
+                "攻击样本",
+                f"训练 {v.attack_train} / 验证 {v.attack_validation} / 测试 {v.attack_test}",
+            ),
             ("数据指纹", f'<span class="mono">{_e(v.hash)}</span>'),
             ("实验指纹", f'<span class="mono">{_e(v.experiment_fingerprint)}</span>'),
             ("切分方式", split_text),
+            ("泛化场景", v.generalization),
             ("随机种子", str(v.seed)),
-            ("判定阈值", v.threshold),
+            (
+                "判定阈值",
+                f"{v.threshold}（"
+                + ("验证集 F1 自动选择" if v.threshold_source == "validation_f1" else "人工指定")
+                + "）",
+            ),
+            ("模型选择", "验证集 AUC（测试集只做最终报告）"),
             ("标签对齐", f"{_e(v.labels_mode)}（{v.labels_labelled}/{v.labels_total}）"),
             ("速率兜底", f"{v.min_duration_ms} ms"),
             ("类别分布", " · ".join(f"{c['label']} {c['count']:,}" for c in v.classes) or "—"),
@@ -428,7 +462,7 @@ def render_html(
 {checklist_box}
 
 <div class="band">
-  <div class="cell"><div class="k">最佳模型</div><div class="v mono">{_e(v.best_model)}</div>
+  <div class="cell"><div class="k">验证集最佳模型</div><div class="v mono">{_e(v.best_model)}</div>
     <div class="n">{_e(v.best_kind_cn)}</div></div>
   <div class="cell"><div class="k">AUC</div>
     <div class="v {"warn" if v.suspicious_auc else ""}">{_e(v.auc)}</div>
@@ -443,12 +477,14 @@ def render_html(
 
 <h2><span class="idx">01</span>测试集分数峰值</h2>
 {_signal(v)}
+{threshold_html}
 {small}
 
 <h2><span class="idx">02</span>模型对比</h2>
+<p class="cap">最佳模型只按验证集 AUC 选择；AUC 及其后指标均来自未参与选择的测试集。</p>
 <div class="table-scroll"><table class="data wide"><thead><tr><th>模型</th><th>类型</th>
-<th class="num">AUC</th><th class="num">PR-AUC</th><th class="num">F1</th>
-<th class="num">精确率</th><th class="num">召回率</th><th class="num">误报率</th><th class="num">耗时</th>
+<th class="num">验证 AUC</th><th class="num">测试 AUC</th><th class="num">测试 PR-AUC</th><th class="num">测试 F1</th>
+<th class="num">精确率</th><th class="num">召回率</th><th class="num">误报率</th><th class="num">阈值</th><th class="num">耗时</th>
 <th class="num">TP</th><th class="num">FP</th><th class="num">FN</th><th class="num">TN</th></tr></thead>
 <tbody>{model_rows}</tbody></table></div>
 

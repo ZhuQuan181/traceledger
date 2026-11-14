@@ -10,10 +10,10 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import confusion_matrix
 
-from flowlab.eval.metrics import compute_metrics
+from flowlab.eval.metrics import choose_threshold_f1, compute_metrics, threshold_scan
 from flowlab.eval.split import plan_split
 from flowlab.features.leakage import detect
-from flowlab.features.prepare import build_matrix_pair
+from flowlab.features.prepare import build_matrix_splits
 from flowlab.models.registry import available, create
 from flowlab.schema import is_benign
 
@@ -149,26 +149,50 @@ class EvalResult:
     metrics: dict
     confusion: dict
     duration_s: float
+    validation_metrics: dict = field(default_factory=dict)
+    validation_confusion: dict = field(default_factory=dict)
+    selection_rule: str = "validation_auc"
     params: dict = field(default_factory=dict)
     split: str = "temporal"
     split_requested: str = "temporal"
     dataset_hash: str = ""
     n_train: int = 0
+    n_validation: int = 0
     n_test: int = 0
     threshold: float = 0.5
+    threshold_source: str = "fixed"
     top_flows: list[dict] = field(default_factory=list)
     score_curve: list[dict] = field(default_factory=list)
+    score_curve_basis: str = "order"
+    threshold_scan: list[dict] = field(default_factory=list)
     by_label: list[dict] = field(default_factory=list)
     false_positives: list[dict] = field(default_factory=list)
     false_negatives: list[dict] = field(default_factory=list)
     source_ranking: list[dict] = field(default_factory=list)
     seed: int = 42
     attack_train: int = 0
+    attack_validation: int = 0
     features: list[str] = field(default_factory=list)
     encoded_features: int = 0
+    split_diagnostics: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def selection_auc(result: EvalResult) -> float | None:
+    """模型选择只看验证集；旧历史没有验证指标时才退回测试集。"""
+    value = (result.validation_metrics or {}).get("auc")
+    if value is not None:
+        return float(value)
+    return result.metrics.get("auc")
+
+
+def select_best(results: list[EvalResult]) -> EvalResult | None:
+    """按验证集 AUC 选模型，测试集不参与选择。"""
+    if not results:
+        return None
+    return max(results, key=lambda result: selection_auc(result) or float("-inf"))
 
 
 def run_experiment(
@@ -176,8 +200,10 @@ def run_experiment(
     models: list[str] | None = None,
     split: str = "temporal",
     test_size: float = 0.3,
+    validation_size: float = 0.2,
     seed: int = 42,
     threshold: float = 0.5,
+    threshold_mode: str = "fixed",
     label_col: str = "label",
     explain: bool = False,
     top_k: int = 20,
@@ -192,6 +218,8 @@ def run_experiment(
         raise ValueError(f"未知模型 {unknown}，可用模型: {available()}")
     if not 0 <= threshold <= 1:
         raise ValueError("threshold 应在 0~1 之间")
+    if threshold_mode not in {"fixed", "f1"}:
+        raise ValueError("threshold_mode 只能是 fixed 或 f1")
     if label_col not in df.columns:
         raise ValueError(
             f"缺少标签列 {label_col!r}。评估需要每条流都有标签；"
@@ -205,9 +233,22 @@ def run_experiment(
             "未标注的流不能被当作攻击样本；请补齐标签或先过滤这些行。"
         )
 
-    plan = plan_split(df, mode=split, test_size=test_size, seed=seed, label_col=label_col)
+    plan = plan_split(
+        df,
+        mode=split,
+        test_size=test_size,
+        validation_size=validation_size,
+        seed=seed,
+        label_col=label_col,
+    )
     warns = detect(df, split=plan.effective, label_col=label_col)
+    validation_labels = df.loc[plan.validation, label_col].map(is_benign)
     test_labels = df.loc[plan.test, label_col].map(is_benign)
+    if validation_labels.all() or not validation_labels.any():
+        raise ValueError(
+            "验证集必须同时包含 BENIGN 和攻击样本，否则无法在不读取测试集的情况下选择模型。"
+            "请调整切分比例或切分方式，或增加样本量。"
+        )
     if test_labels.all() or not test_labels.any():
         raise ValueError(
             "测试集必须同时包含 BENIGN 和攻击样本，否则无法计算 AUC、召回率与误报率。"
@@ -224,21 +265,58 @@ def run_experiment(
                 "suggestion": "补齐可解析的时间戳后重跑；否则把结论明确标成随机切分，不能声称时间外推。",
             },
         )
-    elif plan.warnings:
-        warns.insert(
-            0,
+    else:
+        coverage_messages = [
+            message
+            for message in plan.warnings
+            if "实体同时出现在多个子集中" not in message and "完全重复内容" not in message
+        ]
+        if coverage_messages:
+            warns.insert(
+                0,
+                {
+                    "rule": "split_coverage",
+                    "columns": [],
+                    "severity": "high",
+                    "message": " ".join(coverage_messages),
+                    "suggestion": "检查攻击样本在时间上的分布，调整 test_size 或先修正数据切分。",
+                },
+            )
+    diagnostics = plan.diagnostics or {}
+    duplicate_cross = diagnostics.get("duplicate_cross") or {}
+    if any(duplicate_cross.values()):
+        warns.append(
             {
-                "rule": "split_coverage",
+                "rule": "duplicate_leak",
                 "columns": [],
                 "severity": "high",
-                "message": " ".join(plan.warnings),
-                "suggestion": "检查攻击样本在时间上的分布，调整 test_size 或先修正数据切分。",
-            },
+                "message": "训练/验证/测试之间存在完全重复内容，重复样本会同时抬高验证与测试指标。",
+                "suggestion": "先去重；若要评估泛化能力，改用 --split group 按实体切分。",
+            }
+        )
+    entity_overlap = diagnostics.get("entity_overlap") or {}
+    if plan.effective != "group" and any(entity_overlap.values()):
+        warns.append(
+            {
+                "rule": "entity_overlap",
+                "columns": [],
+                "severity": "medium",
+                "message": (
+                    f"按 {diagnostics.get('entity_key')} 统计，同一实体出现在多个子集中；"
+                    "指标衡量的是同分布拟合，不是新主机/新会话泛化。"
+                ),
+                "suggestion": "若研究目标是泛化到未见实体，改用 --split group。",
+            }
         )
     dh = dataset_hash(df)
 
-    train_idx, test_idx = plan.train, plan.test
-    prep_tr, prep_te = build_matrix_pair(df.loc[train_idx], df.loc[test_idx], label_col=label_col)
+    train_idx, validation_idx, test_idx = plan.train, plan.validation, plan.test
+    prep_tr, prep_val, prep_te = build_matrix_splits(
+        df.loc[train_idx],
+        df.loc[validation_idx],
+        df.loc[test_idx],
+        label_col=label_col,
+    )
 
     if (prep_tr.y == 1).sum() == 0 and any(create(n).kind == "supervised" for n in models):
         raise ValueError(
@@ -251,12 +329,28 @@ def run_experiment(
         t0 = time.perf_counter()
         det = create(name)
         det.fit(prep_tr.X, prep_tr.y)
+        validation_scores = det.score(prep_val.X)
         scores = det.score(prep_te.X)
-        metrics = compute_metrics(prep_te.y, scores, threshold=threshold)
-        cm = confusion_matrix(prep_te.y, (scores >= threshold).astype(int), labels=[0, 1]).ravel()
+        chosen_threshold = (
+            choose_threshold_f1(prep_val.y, validation_scores, fallback=threshold)
+            if threshold_mode == "f1"
+            else threshold
+        )
+        validation_metrics = compute_metrics(
+            prep_val.y, validation_scores, threshold=chosen_threshold
+        )
+        metrics = compute_metrics(prep_te.y, scores, threshold=chosen_threshold)
+        validation_cm = confusion_matrix(
+            prep_val.y, (validation_scores >= chosen_threshold).astype(int), labels=[0, 1]
+        ).ravel()
+        cm = confusion_matrix(
+            prep_te.y, (scores >= chosen_threshold).astype(int), labels=[0, 1]
+        ).ravel()
+        scan = threshold_scan(prep_te.y, scores)
 
         top_flows: list[dict] = []
         score_curve: list[dict] = []
+        curve_basis = "order"
         by_label: list[dict] = []
         false_positives: list[dict] = []
         false_negatives: list[dict] = []
@@ -281,10 +375,19 @@ def run_experiment(
             ]
             top = te.sort_values("score", ascending=False).head(top_k)
             arr = np.asarray(scores, dtype=float)
+            if plan.effective == "temporal" and "timestamp" in te.columns:
+                timestamps = pd.to_datetime(te["timestamp"], errors="coerce", format="mixed")
+                if timestamps.notna().any():
+                    ordered_index = timestamps.sort_values(kind="mergesort").index
+                    arr = pd.Series(arr, index=te.index).loc[ordered_index].to_numpy()
+                    curve_basis = "time"
             buckets = np.array_split(arr, min(90, max(20, len(arr) // 12)))
             # p = 该时间窗内的最高分（用来定高度），h = 超过阈值的比例（用来定红色浓度）
             score_curve = [
-                {"p": round(float(np.max(b)), 3), "h": round(float((b >= threshold).mean()), 3)}
+                {
+                    "p": round(float(np.max(b)), 3),
+                    "h": round(float((b >= chosen_threshold).mean()), 3),
+                }
                 if len(b)
                 else {"p": 0.0, "h": 0.0}
                 for b in buckets
@@ -298,7 +401,12 @@ def run_experiment(
                 for row in top[cols + ["score"]].to_dict("records")
             ]
             by_label, false_positives, false_negatives, source_ranking = _investigation_details(
-                df, test_idx, np.asarray(scores), prep_te.y, threshold, label_col
+                df,
+                test_idx,
+                np.asarray(scores),
+                prep_te.y,
+                chosen_threshold,
+                label_col,
             )
         results.append(
             EvalResult(
@@ -307,23 +415,36 @@ def run_experiment(
                 metrics=metrics,
                 confusion={"tn": int(cm[0]), "fp": int(cm[1]), "fn": int(cm[2]), "tp": int(cm[3])},
                 duration_s=round(time.perf_counter() - t0, 3),
+                validation_metrics=validation_metrics,
+                validation_confusion={
+                    "tn": int(validation_cm[0]),
+                    "fp": int(validation_cm[1]),
+                    "fn": int(validation_cm[2]),
+                    "tp": int(validation_cm[3]),
+                },
                 params=det.info().get("params", {}),
                 split=plan.effective,
                 split_requested=split,
                 dataset_hash=dh,
                 n_train=int(len(prep_tr.X)),
+                n_validation=int(len(prep_val.X)),
                 n_test=int(len(prep_te.X)),
-                threshold=threshold,
+                threshold=round(float(chosen_threshold), 4),
+                threshold_source="validation_f1" if threshold_mode == "f1" else "fixed",
                 top_flows=top_flows,
                 score_curve=score_curve,
+                threshold_scan=scan,
+                score_curve_basis=curve_basis,
                 by_label=by_label,
                 false_positives=false_positives,
                 false_negatives=false_negatives,
                 source_ranking=source_ranking,
                 seed=seed,
                 attack_train=int((prep_tr.y == 1).sum()),
+                attack_validation=int((prep_val.y == 1).sum()),
                 features=list(prep_tr.raw_features),
                 encoded_features=len(prep_tr.feature_names),
+                split_diagnostics=diagnostics,
             )
         )
     return results, warns

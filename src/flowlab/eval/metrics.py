@@ -8,6 +8,7 @@ from sklearn.metrics import (
     average_precision_score,
     confusion_matrix,
     f1_score,
+    precision_recall_curve,
     precision_score,
     recall_score,
     roc_auc_score,
@@ -46,3 +47,44 @@ def compute_metrics(y_true: np.ndarray, scores: np.ndarray, threshold: float = 0
         "support": int(len(y_true)),
         "attack_support": int(y_true.sum()),
     }
+
+
+def choose_threshold_f1(y_true: np.ndarray, scores: np.ndarray, fallback: float = 0.5) -> float:
+    """只在验证集上按 F1 选阈值；没有可用的两类样本时退回人工阈值。"""
+    y_true = np.asarray(y_true).astype(int)
+    scores = np.asarray(scores, dtype=float)
+    if len(np.unique(y_true)) < 2:
+        return float(fallback)
+    precision, recall, thresholds = precision_recall_curve(y_true, scores)
+    if not len(thresholds):
+        return float(fallback)
+    f1 = (
+        2
+        * precision[:-1]
+        * recall[:-1]
+        / np.maximum(
+            precision[:-1] + recall[:-1],
+            1e-12,
+        )
+    )
+    best = int(np.argmax(f1))
+    return float(np.clip(thresholds[best], 0.0, 1.0))
+
+
+def threshold_scan(y_true: np.ndarray, scores: np.ndarray, points: int = 11) -> list[dict]:
+    """测试集阈值扫描，只用于展示部署权衡，不能拿来回选阈值。"""
+    y_true = np.asarray(y_true).astype(int)
+    scores = np.asarray(scores, dtype=float)
+    rows = []
+    for threshold in np.linspace(0.05, 0.95, points):
+        metrics = compute_metrics(y_true, scores, threshold=float(threshold))
+        rows.append(
+            {
+                "threshold": round(float(threshold), 2),
+                "precision": metrics["precision"],
+                "recall": metrics["recall"],
+                "f1": metrics["f1"],
+                "fpr": metrics["fpr"],
+            }
+        )
+    return rows

@@ -21,8 +21,10 @@ class ExperimentSpec:
     models: list[str] = field(default_factory=lambda: ["mlp", "iforest", "autoencoder"])
     split: str = "temporal"
     test_size: float = 0.3
+    validation_size: float = 0.2
     seed: int = 42
     threshold: float = 0.5
+    threshold_mode: str = "fixed"
     explain: bool = True
     ablate: str | None = None
     source_kind: str = "demo"
@@ -42,10 +44,14 @@ def reproduction_command(spec: ExperimentSpec, effective_split: str) -> str:
         spec.split,
         "--test-size",
         str(spec.test_size),
+        "--validation-size",
+        str(spec.validation_size),
         "--seed",
         str(spec.seed),
         "--threshold",
         str(spec.threshold),
+        "--threshold-mode",
+        spec.threshold_mode,
         "--models",
         ",".join(spec.models),
     ]
@@ -84,8 +90,14 @@ def validate_spec(spec: ExperimentSpec) -> None:
         raise ValueError(f"未知模型 {unknown}，可用模型: {available()}")
     if not 0 <= spec.threshold <= 1:
         raise ValueError("threshold 应在 0~1 之间")
+    if spec.threshold_mode not in {"fixed", "f1"}:
+        raise ValueError("threshold_mode 只能是 fixed 或 f1")
     if not 0.05 <= spec.test_size <= 0.5:
         raise ValueError("test_size 应在 0.05~0.5 之间")
+    if not 0.05 <= spec.validation_size <= 0.4:
+        raise ValueError("validation_size 应在 0.05~0.4 之间")
+    if spec.test_size + spec.validation_size > 0.8:
+        raise ValueError("test_size + validation_size 不能超过 0.8")
     if not 0 <= spec.seed <= 2**32 - 1:
         raise ValueError("seed 应在 0~4294967295 之间")
     if spec.source_kind == "demo" and (spec.normal < 1 or spec.attack < 1):
@@ -102,7 +114,9 @@ def execute(df: pd.DataFrame, meta: dict, source: str, spec: ExperimentSpec) -> 
         split=spec.split,
         seed=spec.seed,
         threshold=spec.threshold,
+        threshold_mode=spec.threshold_mode,
         test_size=spec.test_size,
+        validation_size=spec.validation_size,
         explain=spec.explain,
     )
     ablation = None
@@ -119,7 +133,9 @@ def execute(df: pd.DataFrame, meta: dict, source: str, spec: ExperimentSpec) -> 
             split=spec.split,
             seed=spec.seed,
             threshold=spec.threshold,
+            threshold_mode=spec.threshold_mode,
             test_size=spec.test_size,
+            validation_size=spec.validation_size,
         ).to_dict()
     meta = dict(meta)
     effective_split = results[0].split if results else spec.split

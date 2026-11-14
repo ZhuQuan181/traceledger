@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from flowlab import __version__
 from flowlab.eval.table import markdown_table
 from flowlab.features.leakage import summarize
 from flowlab.pipeline import load_frame
@@ -22,10 +23,22 @@ from flowlab.service import ExperimentSpec, demo_frame, execute, results_of, sco
 
 def _add_run_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--models", default="mlp,iforest,autoencoder")
-    p.add_argument("--split", default="temporal", choices=["temporal", "random"])
+    p.add_argument("--split", default="temporal", choices=["temporal", "random", "group"])
     p.add_argument("--test-size", type=float, default=0.3, help="测试集比例（0.05~0.5）")
+    p.add_argument(
+        "--validation-size",
+        type=float,
+        default=0.2,
+        help="验证集比例（0.05~0.4，仅用于选择模型）",
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--threshold", type=float, default=0.5)
+    p.add_argument(
+        "--threshold-mode",
+        default="fixed",
+        choices=["fixed", "f1"],
+        help="fixed=使用 --threshold；f1=只在验证集上按 F1 自动选阈值",
+    )
     p.add_argument("--json", action="store_true")
     p.add_argument("--report", type=Path, help="Markdown 报告输出路径")
     p.add_argument("--html", type=Path, help="单文件 HTML 报告输出路径")
@@ -35,6 +48,7 @@ def _add_run_flags(p: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="flowlab", description="流量异常检测研究/实验工作台")
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="cmd")
 
     d = sub.add_parser("demo", help="用合成数据跑一次完整实验")
@@ -66,6 +80,11 @@ def build_parser() -> argparse.ArgumentParser:
     sv = sub.add_parser("serve", help="启动本地 Web 界面")
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8765)
+    sv.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="允许绑定非回环地址；FlowLab 没有多用户鉴权，请自行限制网络访问",
+    )
 
     h = sub.add_parser("history", help="最近的实验（本地 SQLite）")
     h.add_argument("--limit", type=int, default=20)
@@ -162,6 +181,14 @@ def main(argv: list[str] | None = None) -> int:
 
         from flowlab.api.main import app
 
+        loopback = {"127.0.0.1", "::1", "localhost"}
+        if args.host not in loopback and not args.allow_remote:
+            print(
+                f"拒绝绑定 {args.host}：这会把无鉴权的本地工作台暴露到网络。"
+                "如确需远程访问，请显式加 --allow-remote，并用防火墙/反向代理限制来源。",
+                file=sys.stderr,
+            )
+            return 2
         print(f"FlowLab 已启动: http://{args.host}:{args.port}")
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
         return 0
@@ -259,7 +286,9 @@ def main(argv: list[str] | None = None) -> int:
             split=args.split,
             seed=args.seed,
             threshold=args.threshold,
+            threshold_mode=args.threshold_mode,
             test_size=args.test_size,
+            validation_size=args.validation_size,
             ablate=args.ablate or None,
             source_kind="demo",
             normal=args.normal,
@@ -282,7 +311,9 @@ def main(argv: list[str] | None = None) -> int:
             split=args.split,
             seed=args.seed,
             threshold=args.threshold,
+            threshold_mode=args.threshold_mode,
             test_size=args.test_size,
+            validation_size=args.validation_size,
             ablate=args.ablate or None,
             source_kind="file",
             source_ref=str(args.file),

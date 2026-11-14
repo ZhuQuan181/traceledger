@@ -122,26 +122,71 @@ def build_matrix(
     )
 
 
-def build_matrix_pair(
-    train_df: pd.DataFrame, test_df: pd.DataFrame, label_col: str = "label"
-) -> tuple[Prepared, Prepared]:
-    """严格版：预处理器只在训练集 fit，再 transform 测试集。"""
-    if label_col not in train_df.columns or label_col not in test_df.columns:
+def _prepare_frames(
+    train_df: pd.DataFrame,
+    eval_frames: list[pd.DataFrame],
+    label_col: str,
+) -> tuple[Prepared, list[Prepared]]:
+    if any(label_col not in frame.columns for frame in [train_df, *eval_frames]):
         raise ValueError(f"缺少标签列 {label_col!r}")
     feats_tr = _features(train_df, label_col=label_col)
-    feats_te = _features(test_df, label_col=label_col).reindex(columns=feats_tr.columns)
     if feats_tr.shape[1] == 0:
         raise ValueError("没有可用特征列")
 
     ct = _make_preprocessor(feats_tr)
     Xtr = np.asarray(ct.fit_transform(feats_tr), dtype=float)
-    Xte = np.asarray(ct.transform(feats_te), dtype=float)
     names = list(ct.get_feature_names_out())
     raw_features = list(feats_tr.columns)
-    return (
-        Prepared(Xtr, _label_to_binary(train_df[label_col]), names, ct, feats_tr, raw_features),
-        Prepared(Xte, _label_to_binary(test_df[label_col]), names, ct, feats_te, raw_features),
+    train = Prepared(
+        Xtr,
+        _label_to_binary(train_df[label_col]),
+        names,
+        ct,
+        feats_tr,
+        raw_features,
     )
+
+    prepared: list[Prepared] = []
+    for frame in eval_frames:
+        feats = _features(frame, label_col=label_col).reindex(columns=feats_tr.columns)
+        X = np.asarray(ct.transform(feats), dtype=float)
+        prepared.append(
+            Prepared(
+                X,
+                _label_to_binary(frame[label_col]),
+                names,
+                ct,
+                feats,
+                raw_features,
+            )
+        )
+    return train, prepared
+
+
+def build_matrix_pair(
+    train_df: pd.DataFrame, test_df: pd.DataFrame, label_col: str = "label"
+) -> tuple[Prepared, Prepared]:
+    """严格版：预处理器只在训练集 fit，再 transform 测试集。"""
+    train, (test,) = _prepare_frames(train_df, [test_df], label_col)
+    return train, test
+
+
+def build_matrix_splits(
+    train_df: pd.DataFrame,
+    validation_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    label_col: str = "label",
+) -> tuple[Prepared, Prepared, Prepared]:
+    """训练集拟合预处理器，验证集与测试集只 transform。
+
+    验证集用于选模型/阈值，测试集只用于最终报告；两者不能反过来参与预处理拟合。
+    """
+    train, (validation, test) = _prepare_frames(
+        train_df,
+        [validation_df, test_df],
+        label_col,
+    )
+    return train, validation, test
 
 
 def build_feature_matrix(df: pd.DataFrame, drop_extra: list[str] | None = None):

@@ -72,7 +72,11 @@ def judge(
         return keep
 
     leak_rules = {w["rule"] for w in warns}
-    hard_leaks = _effective({"id_leak", "target_leak", "time_leak"})
+    # 时间泄漏发生在切分层，不是"特征列有没有被丢掉"的问题。
+    # timestamp 通常本来就不会进入特征矩阵，因此不能经过 used_features 过滤。
+    time_leaks = leak_rules & {"time_leak"}
+    column_leaks = _effective({"id_leak", "target_leak"})
+    hard_leaks = column_leaks | time_leaks
     has_port_leak = bool(_effective({"port_leak"}))
     # 端口痕迹 + 满分 AUC 同时出现：通常泄漏是主因，升级成 fail。
     # 但如果已经对这一点做过消融、且 Δ 很小，说明端口并没有在抬指标，
@@ -94,7 +98,8 @@ def judge(
         and auc >= BANDS["auc"]["suspicious"]
         and not port_tested_weak
     )
-    dropped_leaks = leak_rules - hard_leaks - ({"port_leak"} if has_port_leak else set())
+    feature_leak_rules = leak_rules & {"id_leak", "target_leak", "port_leak"}
+    dropped_leaks = feature_leak_rules - hard_leaks - ({"port_leak"} if has_port_leak else set())
     checks: list[dict] = []
 
     # 0) 切分声明是否兑现
@@ -114,11 +119,15 @@ def judge(
 
     # 1) 泄漏
     if hard_leaks:
+        if time_leaks:
+            detail = "带时间戳的数据使用了随机切分，测试集的未来样本已进入训练集"
+        else:
+            detail = "、".join(sorted(hard_leaks)) + " 会把答案带进特征"
         checks.append(
             {
                 "name": "数据泄漏",
                 "status": "fail",
-                "detail": "、".join(sorted(hard_leaks)) + " 会把答案带进特征",
+                "detail": detail,
             }
         )
     elif escalate_port:
@@ -158,6 +167,25 @@ def judge(
         )
     else:
         checks.append({"name": "数据泄漏", "status": "pass", "detail": "四类规则均未命中"})
+
+    overlap = [w for w in warns if w["rule"] in {"duplicate_leak", "entity_overlap"}]
+    if any(w["rule"] == "duplicate_leak" for w in overlap):
+        checks.append(
+            {
+                "name": "切分重叠",
+                "status": "warn",
+                "detail": "子集之间存在完全重复内容，指标可能偏乐观；先去重或按实体分组切分",
+            }
+        )
+    elif overlap:
+        message = str(overlap[0]["message"]).rstrip("。； ")
+        checks.append(
+            {
+                "name": "切分重叠",
+                "status": "warn",
+                "detail": message + "；这不影响同分布结论，但不能外推到新实体",
+            }
+        )
 
     # 2) 指标是否"好得不像真的"
     effective_leak = bool(hard_leaks) or escalate_port

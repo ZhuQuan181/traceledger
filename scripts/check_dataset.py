@@ -20,10 +20,15 @@ LABEL_CANDIDATES = ("label", "labels", "class", "attack", "y", "target", "is_att
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("file")
+    ap.add_argument(
+        "--allow-pickle",
+        action="store_true",
+        help="允许反序列化 pickle（会执行代码，仅用于完全可信的文件）",
+    )
     a = ap.parse_args()
 
     try:
-        df, info = read_any(a.file, allow_pickle=True)
+        df, info = read_any(a.file, allow_pickle=a.allow_pickle)
     except Exception as exc:  # noqa: BLE001 - CLI 边界必须把任意读取错误转成可读提示
         print(f"✗ 读取失败：{exc}")
         return 2

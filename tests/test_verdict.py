@@ -45,6 +45,46 @@ def test_id_leak_on_used_column_blocks():
     assert leak["status"] == "fail"
 
 
+def test_time_leak_blocks_even_when_timestamp_is_not_a_feature():
+    """timestamp 通常不会进入特征矩阵，但随机切分本身已经造成时间泄漏。"""
+    warns = [_leak("time_leak", ["timestamp"])]
+    v = judge(
+        _m(),
+        warns,
+        n_test=2000,
+        ablation={"column": "dst_port", "rows": [{"delta": 0.01}]},
+        used_features=["dst_port", "bytes_per_s"],
+        split_requested="random",
+        split_effective="random",
+    )
+    leak = next(c for c in v.checks if c["name"] == "数据泄漏")
+    assert leak["status"] == "fail"
+    assert "随机切分" in leak["detail"]
+    assert v.level == "fail"
+
+
+def test_entity_overlap_does_not_masquerade_as_a_dropped_leak_column():
+    warns = [
+        {
+            "rule": "entity_overlap",
+            "columns": [],
+            "severity": "medium",
+            "message": "同一实体跨子集",
+            "suggestion": "使用分组切分",
+        }
+    ]
+    v = judge(
+        _m(),
+        warns,
+        n_test=2000,
+        ablation={"column": "dst_port", "rows": [{"delta": 0.01}]},
+    )
+    leak = next(c for c in v.checks if c["name"] == "数据泄漏")
+    assert leak["status"] == "pass"
+    assert "entity_overlap" not in leak["detail"]
+    assert any(c["name"] == "切分重叠" for c in v.checks)
+
+
 def test_perfect_auc_with_leak_fails():
     warns = [_leak("port_leak", ["dst_port"])]
     v = judge(
