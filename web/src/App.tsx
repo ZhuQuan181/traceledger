@@ -25,6 +25,7 @@ export default function App() {
   const [split, setSplit] = useState<"temporal" | "random">("temporal");
   const [threshold, setThreshold] = useState(0.5);
   const [ablate, setAblate] = useState("");
+  const [ablationColumns, setAblationColumns] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [labelsFile, setLabelsFile] = useState<File | null>(null);
   const [allowPickle, setAllowPickle] = useState(false);
@@ -49,6 +50,16 @@ export default function App() {
     return payload.results.reduce((a, b) => ((b.metrics.auc ?? 0) > (a.metrics.auc ?? 0) ? b : a));
   }, [payload]);
 
+  function applyPayload(data: Payload, preferredAblate?: string) {
+    setPayload(data);
+    const used = data.dataset.features?.used ?? [];
+    setAblationColumns(used);
+    setAblate((current) => {
+      const target = preferredAblate ?? current;
+      return target && used.includes(target) ? target : "";
+    });
+  }
+
   async function run(override?: { ablate?: string }) {
     if (selected.length === 0) {
       setError("至少选择一个模型。");
@@ -70,7 +81,7 @@ export default function App() {
       const data = source === "demo"
         ? await runDemo({ ...params, normal, attack, leaky })
         : await runUpload(file!, params, labelsFile, allowPickle);
-      setPayload(data);
+      applyPayload(data, ablateValue);
       refreshHistory();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -84,7 +95,7 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      setPayload(await loadRun(id));
+      applyPayload(await loadRun(id));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -99,6 +110,8 @@ export default function App() {
   function selectFile(next: File | null) {
     setFile(next);
     setLabelsFile(null);
+    setAblate("");
+    setAblationColumns([]);
     setError(null);
     if (!/\.(pkl|pickle|p)$/i.test(next?.name ?? "")) setAllowPickle(false);
   }
@@ -170,12 +183,14 @@ export default function App() {
             setFile(null);
             setLabelsFile(null);
             setAllowPickle(false);
+            setAblate("");
+            setAblationColumns([]);
           }}
           normal={normal} attack={attack} onNormal={setNormal} onAttack={setAttack}
           leaky={leaky} onLeaky={setLeaky}
           split={split} onSplit={setSplit}
           threshold={threshold} onThreshold={setThreshold}
-          ablate={ablate} onAblate={setAblate}
+          ablate={ablate} onAblate={setAblate} ablationColumns={ablationColumns}
           file={file} onFile={selectFile}
           labelsFile={labelsFile} onLabelsFile={setLabelsFile}
           allowPickle={allowPickle} onAllowPickle={setAllowPickle}

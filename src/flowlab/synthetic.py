@@ -1,8 +1,8 @@
 """合成流量数据生成器（不依赖任何真实数据集）。
 
-生成 CICFlowMeter 风格的假数据，并且**故意**保留两类典型数据泄漏：
-1. 攻击流的目的端口固定为 3333（端口泄漏）；
-2. 时间戳可用于未来信息泄漏（需配合随机切分才会触发）。
+默认生成不带端口泄漏的数据；`leakage_only=True` 时才把攻击流的
+目的端口集中到 3333，用于演示端口泄漏与消融。
+时间戳仍可用于演示随机切分带来的未来信息泄漏。
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ def generate(
 
     leakage_only=True：攻击流与正常流在**所有行为特征上同分布**，只有目的端口不同。
     这是用来演示"端口泄漏"的极端构造 —— 去掉端口后模型应当掉到随机水平。
+    默认 False，避免第一次 demo 直接命中端口泄漏。
     """
     rng = np.random.default_rng(seed)
     n = n_normal + n_attack
@@ -52,12 +53,13 @@ def generate(
     total_packets = (fwd_packets + bwd_packets).astype(float)
     dur_s = np.maximum(duration / 1e6, 1e-6)
 
-    # 目的端口：正常流随机；攻击流 96% 打 3333（故意留 4% 噪声）
+    # 默认所有流从同一组端口独立采样，不把标签泄漏进端口。
+    # leakage_only 时才让攻击流 96% 打 3333（故意留 4% 噪声）。
     dst_port = rng.choice(NORMAL_PORTS, n).astype(np.int64)
-    dst_port = np.where(is_attack, ATTACK_PORT, dst_port)
-    # 4% 攻击流换端口，避免"完美可分"
-    flip = is_attack & (rng.random(n) < 0.04)
-    dst_port = np.where(flip, rng.choice(NORMAL_PORTS, n), dst_port)
+    if leakage_only:
+        dst_port = np.where(is_attack, ATTACK_PORT, dst_port)
+        flip = is_attack & (rng.random(n) < 0.04)
+        dst_port = np.where(flip, rng.choice(NORMAL_PORTS, n), dst_port)
 
     protocol = (rng.choice([6, 6, 6, 17], n) if leakage_only
                 else np.where(is_attack, 17, rng.choice([6, 6, 6, 17], n)))

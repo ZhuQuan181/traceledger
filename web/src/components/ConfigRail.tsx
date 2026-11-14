@@ -13,6 +13,7 @@ type Props = {
   onSplit: (s: "temporal" | "random") => void;
   threshold: number; onThreshold: (t: number) => void;
   ablate: string; onAblate: (col: string) => void;
+  ablationColumns: string[];
   file: File | null; onFile: (f: File | null) => void;
   labelsFile: File | null; onLabelsFile: (f: File | null) => void;
   allowPickle: boolean; onAllowPickle: (v: boolean) => void;
@@ -114,16 +115,19 @@ export function ConfigRail(p: Props) {
         </div>
         <label className="inline-field">
           <span>消融列</span>
-          <select name="ablate" value={p.ablate} onChange={(e) => p.onAblate(e.target.value)}>
-            <option value="">不消融</option>
-            <option value="dst_port">dst_port</option>
-            <option value="protocol">protocol</option>
-            <option value="duration_us">duration_us</option>
+          <select name="ablate" value={p.ablate} disabled={p.ablationColumns.length === 0}
+                  onChange={(e) => p.onAblate(e.target.value)}>
+            <option value="">{p.ablationColumns.length ? "不消融" : "先运行一次"}</option>
+            {p.ablationColumns.map((col) => (
+              <option key={col} value={col}>{col}</option>
+            ))}
           </select>
         </label>
-        <p className="hint">{p.ablate
-          ? `会多跑一遍：去掉 ${p.ablate} 后对比 AUC。`
-          : "选一列后系统会去掉它重跑，量化这一列的贡献。"}</p>
+        <p className="hint">{p.ablationColumns.length === 0
+          ? "先运行一次，系统会列出这次实际参与训练的特征列。"
+          : p.ablate
+            ? `会多跑一遍：去掉 ${p.ablate} 后对比 AUC。`
+            : "选一列后系统会去掉它重跑，量化这一列的贡献。"}</p>
       </section>
 
       <section className="rail-run">

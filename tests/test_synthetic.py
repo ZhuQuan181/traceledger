@@ -14,10 +14,17 @@ def test_timestamp_monotonic():
     assert ts.is_monotonic_increasing
 
 
-def test_port_leak_is_planted():
-    df = generate(n_normal=2000, n_attack=500, seed=7)
+def test_port_leak_is_planted_only_in_leaky_mode():
+    df = generate(n_normal=2000, n_attack=500, seed=7, leakage_only=True)
     leak = (df.loc[df.Label == "DDoS", "Destination Port"] == 3333).mean()
     assert 0.93 < leak <= 1.0
+
+
+def test_default_data_has_no_port_leak():
+    df = generate(n_normal=2000, n_attack=500, seed=7)
+    attack = df.loc[df.Label == "DDoS", "Destination Port"]
+    benign = df.loc[df.Label == "BENIGN", "Destination Port"]
+    assert abs((attack == 3333).mean() - (benign == 3333).mean()) < 0.15
 
 
 def test_deterministic():

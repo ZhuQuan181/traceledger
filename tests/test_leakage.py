@@ -5,8 +5,10 @@ from flowlab.schema import normalize_columns
 from flowlab.synthetic import generate
 
 
-def _df():
-    return normalize_columns(generate(n_normal=500, n_attack=100, seed=11))
+def _df(leakage_only: bool = False):
+    return normalize_columns(
+        generate(n_normal=500, n_attack=100, seed=11, leakage_only=leakage_only)
+    )
 
 
 def test_id_leak_on_flow_id():
@@ -22,7 +24,7 @@ def test_time_leak_only_with_random_split():
 
 
 def test_port_leak_detected():
-    warns = detect(_df(), split="temporal")
+    warns = detect(_df(leakage_only=True), split="temporal")
     assert any(w["rule"] == "port_leak" and "dst_port" in w["columns"] for w in warns)
 
 
