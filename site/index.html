@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlowLab · 流量异常检测研究台</title>
+  <meta name="description" content="FlowLab 是一个本地优先的流量异常检测研究台：统一数据接入、泄漏审计、模型对比、消融和可复现报告。">
+  <meta name="theme-color" content="#edf1ee">
+  <meta property="og:title" content="FlowLab · 流量异常检测研究台">
+  <meta property="og:description" content="把流量异常检测的研究模型，变成能跑、能复现、能解释的系统。">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://zhuquan181.github.io/traceledger/">
+  <meta property="og:image" content="https://zhuquan181.github.io/traceledger/assets/workspace.png">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">跳到主要内容</a>
+
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="FlowLab 首页">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="1" y="14" width="4" height="9"></rect>
+        <rect x="10" y="8" width="4" height="15"></rect>
+        <rect x="19" y="2" width="4" height="21"></rect>
+      </svg>
+      <strong>FlowLab</strong>
+      <span>流量异常检测研究台</span>
+    </a>
+    <nav aria-label="主导航">
+      <a href="#workbench">工作台</a>
+      <a href="#workflow">工作流</a>
+      <a href="#start">开始使用</a>
+      <a href="https://github.com/ZhuQuan181/traceledger">GitHub</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="hero-copy">
+        <h1>先跑一次，<br>再谈模型。</h1>
+        <p class="summary">
+          FlowLab 把 CSV、pcap 和 Zeek 的流量实验收进同一张工作台：
+          先审计泄漏，再切分训练，用同一份特征矩阵比较模型，
+          最后把结论、消融和可疑流写成可离线归档的报告。
+        </p>
+        <div class="actions">
+          <a class="button primary" href="./demo-report.html">看一份真实报告</a>
+          <a class="button" href="#start">在本地启动</a>
+        </div>
+        <dl class="run-record" aria-label="项目状态">
+          <div><dt>输入</dt><dd>14 种格式</dd></div>
+          <div><dt>审计</dt><dd>4 类泄漏</dd></div>
+          <div><dt>模型</dt><dd>3 个基线</dd></div>
+          <div><dt>测试</dt><dd>101 项通过</dd></div>
+        </dl>
+      </div>
+
+      <figure class="hero-figure">
+        <div class="figure-bar">
+          <span>RUN 44a1977407</span>
+          <span>synthetic · temporal</span>
+        </div>
+        <img src="./assets/workspace.png" width="1440" height="900"
+             alt="FlowLab 工作台截图：左侧配置实验，中间展示结论、指标与消融，右侧给出泄漏和下一步建议。">
+        <figcaption>v0.9 工作台：配置、证据和下一步在同一屏内。</figcaption>
+      </figure>
+    </section>
+
+    <section class="statement" aria-labelledby="statement-title">
+      <div>
+        <h2 id="statement-title">指标好看，<br>不等于结论可信。</h2>
+      </div>
+      <div class="statement-copy">
+        <p>
+          端口、标识符、目标列和时间切分都可能把答案带进特征。
+          FlowLab 先检查会让指标虚高的东西，再让模型开始训练。
+          切分、泄漏、消融、样本量，最终汇成同一份结论。
+        </p>
+        <ul class="invariants">
+          <li><strong>标签不进特征</strong><span>训练前统一丢弃标签与标识列。</span></li>
+          <li><strong>预处理只在训练集拟合</strong><span>测试集统计量不会倒灌。</span></li>
+          <li><strong>同数据同种子逐位一致</strong><span>结果、指纹和报告都能复现。</span></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="workbench" id="workbench" aria-labelledby="workbench-title">
+      <header class="section-head">
+        <h2 id="workbench-title">工作台不是仪表盘，<br>是实验台账。</h2>
+        <p>所有判断都能回到数据、特征和参数，不靠一张漂亮的总览图。</p>
+      </header>
+      <div class="workbench-grid">
+        <figure class="detail-figure">
+          <img src="./assets/intro.png" width="1440" height="900" loading="lazy"
+               alt="FlowLab 首屏截图：展示本地流量实验室、流量轨迹预览和四步工作说明。">
+          <figcaption>第一次打开就能生成一份带泄漏检查的合成实验。</figcaption>
+        </figure>
+        <dl class="ledger">
+          <div>
+            <dt>配置</dt>
+            <dd>数据来源、时间/随机切分、模型、阈值、消融列。上传数据后，消融列从实际特征中读取。</dd>
+          </div>
+          <div>
+            <dt>证据</dt>
+            <dd>AUC、F1、误报率、混淆矩阵、分数曲线、类别分布和参与训练的特征清单。</dd>
+          </div>
+          <div>
+            <dt>判断</dt>
+            <dd>结论卡、自查清单和警告徽标共用同一个 verdict，避免网页与报告互相打架。</dd>
+          </div>
+          <div>
+            <dt>下一步</dt>
+            <dd>按泄漏列重跑、做消融、查看最可疑的流，或直接导出 HTML / Markdown。</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="workflow" id="workflow" aria-labelledby="workflow-title">
+      <header class="section-head">
+        <h2 id="workflow-title">四步，把实验做成证据。</h2>
+        <p>每一步都有明确输入输出，换个人也能从命令和指纹重新跑一遍。</p>
+      </header>
+      <ol class="steps">
+        <li>
+          <span class="step-no">01</span>
+          <div><h3>导入</h3><p>CSV、pcap、Zeek conn.log、parquet、npz、Excel 等 14 种入口。</p></div>
+          <code>flowlab run flows.csv</code>
+        </li>
+        <li>
+          <span class="step-no">02</span>
+          <div><h3>审计</h3><p>检查标识符、端口、目标泄漏和随机切分带来的时间泄漏。</p></div>
+          <code>--ablate dst_port</code>
+        </li>
+        <li>
+          <span class="step-no">03</span>
+          <div><h3>对比</h3><p>MLP、Isolation Forest、AutoEncoder 共用同一份特征矩阵和阈值。</p></div>
+          <code>--models mlp,iforest,autoencoder</code>
+        </li>
+        <li>
+          <span class="step-no">04</span>
+          <div><h3>归档</h3><p>报告记录数据指纹、种子、切分、特征、指标和可疑流。</p></div>
+          <code>--html out/report.html</code>
+        </li>
+      </ol>
+    </section>
+
+    <section class="report-band" aria-labelledby="report-title">
+      <div class="report-copy">
+        <h2 id="report-title">报告不是截图的堆叠。</h2>
+        <p>
+          同一份 payload 驱动网页、Markdown 和自包含 HTML。
+          拿到报告的人可以看到结论为什么成立，也可以按指纹和命令重新跑一次。
+        </p>
+        <a class="report-link" href="./demo-report.html">打开实际生成的示例报告</a>
+      </div>
+      <div class="report-sample" aria-label="示例报告中的泄漏检查片段">
+        <div class="sample-bar"><span>demo-report.html</span><span>standalone</span></div>
+        <pre><code><span class="code-muted"># 结论</span>
+<span class="code-warn">先修泄漏，再看指标</span>
+
+<span class="code-muted"># 检查</span>
+port_leak  类别 DDoS 中 95.2% 走 3333
+verdict    指标不能作为结论
+
+<span class="code-muted"># 复现</span>
+flowlab demo --report out/report.md</code></pre>
+      </div>
+    </section>
+
+    <section class="start" id="start" aria-labelledby="start-title">
+      <div class="start-copy">
+        <h2 id="start-title">在本地跑，<br>数据不出门。</h2>
+        <p>
+          Web 工作台由本机 Python 服务提供，报告和实验历史都留在本地。
+          这个 GitHub Pages 只承载项目介绍和一份静态示例报告。
+        </p>
+        <a class="text-link" href="https://github.com/ZhuQuan181/traceledger">查看源码与文档</a>
+      </div>
+      <div class="terminal">
+        <div class="terminal-bar"><span>terminal</span><span>zsh</span></div>
+        <pre><code><span class="code-muted">$</span> git clone https://github.com/ZhuQuan181/traceledger.git
+<span class="code-muted">$</span> cd traceledger
+<span class="code-muted">$</span> uv sync --extra dev --extra api --extra data
+<span class="code-muted">$</span> uv run flowlab demo
+<span class="code-muted">$</span> uv run flowlab serve
+
+<span class="code-ok">→</span> http://127.0.0.1:8765</code></pre>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-brand">
+      <strong>FlowLab</strong>
+      <span>本地优先的流量异常检测研究台</span>
+    </div>
+    <div class="footer-meta">
+      <span>Apache-2.0</span>
+      <a href="https://github.com/ZhuQuan181/traceledger/blob/master/docs/ARCHITECTURE.md">架构</a>
+      <a href="https://github.com/ZhuQuan181/traceledger">GitHub</a>
+    </div>
+  </footer>
+</body>
+</html>

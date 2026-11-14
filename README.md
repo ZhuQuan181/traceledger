@@ -1,17 +1,28 @@
 # FlowLab · 流量异常检测工作台
 
+[![CI](https://github.com/ZhuQuan181/traceledger/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/ZhuQuan181/traceledger/actions/workflows/ci.yml)
+[![Pages](https://github.com/ZhuQuan181/traceledger/actions/workflows/pages.yml/badge.svg?branch=master)](https://zhuquan181.github.io/traceledger/)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-0d5d61?logo=python&logoColor=white)](https://www.python.org/)
+[![React 18](https://img.shields.io/badge/React-18-0d5d61?logo=react&logoColor=white)](https://react.dev/)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-0d5d61)](LICENSE)
+
 > 工作名（占位，可改）。一句话：**把网络流量异常检测的研究模型，变成能跑、能复现、能解释的系统。**
 
 - 创建：2026-11-11
 - 状态：**v0.5**（2026-11-14：前端视觉与交互重构；101 passed / 1 skipped）
 - 负责人：zq（实现由 Hermes 完成）
 - 文档语言：中文；代码与接口用英文
+- 在线项目页：https://zhuquan181.github.io/traceledger/
+- 示例报告：https://zhuquan181.github.io/traceledger/demo-report.html
+
+[![FlowLab 工作台截图](screens/v09-workspace.png)](https://zhuquan181.github.io/traceledger/)
 
 ## 快速开始
 
 ```bash
 # 0) 没有 uv 先装：https://docs.astral.sh/uv/getting-started/installation/
-cd /mnt/data/traceledger
+git clone https://github.com/ZhuQuan181/traceledger.git
+cd traceledger
 uv sync --extra dev --extra api --extra data
 
 uv run flowlab sample --rows 2000          # 生成一份样例 CSV（可直接给同事）
@@ -27,7 +38,7 @@ uv run flowlab serve                       # Web 界面 127.0.0.1:8765
 
 uv run python scripts/check_dataset.py data.csv        # 训练前体检：类别/缺失/inf/重复
 uv run python scripts/bench_scale.py --rows 690000     # 规模基准（解析/特征/训练耗时）
-cd web && npm install && npm run build     # 改前端后重新构建
+cd web && npm ci && npm run build          # 改前端后重新构建
 ```
 
 pcap 需要本机 `tshark`（Ubuntu: `sudo apt install tshark`）。
@@ -53,6 +64,12 @@ Zeek `conn.log` 可直接读（`.log` / `.log.gz`），标签用 `--labels` 旁�
 通用参数：`--models mlp,iforest`、`--split temporal|random`、`--seed`、`--threshold`、
 `--ablate COLUMN`（去掉某列重跑，量化它撑了多少指标）、`--html PATH`（单文件报告）、
 `--report PATH`（Markdown）、`--json`、`--no-save`。
+
+## 项目页与 CI
+
+- **CI**：Python 3.11 / 3.13 跑完整测试，前端跑 `npm ci && npm run build`
+- **Pages**：部署 `site/` 项目页和一份真实生成的静态报告
+- **本地工作台**：Pages 只承载介绍页；完整 Web 工作台需要本机 Python 后端（`flowlab serve`）
 
 ## 架构
 
