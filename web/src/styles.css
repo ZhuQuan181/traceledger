@@ -386,6 +386,7 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 .run-progress.status-failed { border-left-color: var(--signal); }
 .run-progress.status-cancelled { border-left-color: var(--amber); }
+.run-progress.status-interrupted { border-left-color: var(--signal); }
 .run-progress.status-succeeded { border-left-color: var(--ok); }
 .run-progress-head {
   display: flex; align-items: flex-start; justify-content: space-between;
@@ -415,6 +416,7 @@ button { -webkit-tap-highlight-color: transparent; }
 .job-state-succeeded { border-color: #a8c8b9; background: var(--ok-soft); color: var(--ok); }
 .job-state-failed { border-color: #deb8ad; background: var(--signal-soft); color: var(--signal); }
 .job-state-cancelled { border-color: #dfc89f; background: var(--amber-soft); color: var(--amber); }
+.job-state-interrupted { border-color: #deb8ad; background: var(--signal-soft); color: var(--signal); }
 
 .run-phases {
   display: grid;
@@ -462,6 +464,7 @@ button { -webkit-tap-highlight-color: transparent; }
 }
 .status-failed .job-bar span { background: var(--signal); }
 .status-cancelled .job-bar span { background: var(--amber); }
+.status-interrupted .job-bar span { background: var(--signal); }
 .job-meta {
   display: flex; align-items: baseline; justify-content: space-between;
   gap: 16px; padding-top: 7px;

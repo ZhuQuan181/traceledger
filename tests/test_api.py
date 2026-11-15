@@ -298,7 +298,7 @@ def test_background_job_reports_progress_and_persists_result(monkeypatch, tmp_pa
         assert res.status_code == 200
         job = res.json()
         assert job["percent"] <= 100
-        if job["status"] in {"succeeded", "failed", "cancelled"}:
+        if job["status"] in {"succeeded", "failed", "cancelled", "interrupted"}:
             final = job
             break
         time.sleep(0.03)
@@ -336,7 +336,7 @@ def test_unlabeled_score_job_returns_ranked_flows():
     final = None
     while time.monotonic() < deadline:
         job = client.get(f"/api/jobs/{job_id}").json()
-        if job["status"] in {"succeeded", "failed", "cancelled"}:
+        if job["status"] in {"succeeded", "failed", "cancelled", "interrupted"}:
             final = job
             break
         time.sleep(0.03)
@@ -361,3 +361,44 @@ def test_score_job_rejects_a_supervised_model():
     )
     assert res.status_code == 400
     assert "无监督模型" in res.json()["detail"]
+
+
+def test_job_status_and_unpersisted_result_survive_api_restart(monkeypatch, tmp_path):
+    import flowlab.api.main as api_main
+    from flowlab.jobs import JobManager
+
+    monkeypatch.setenv("FLOWLAB_HOME", str(tmp_path / "restart-home"))
+    first = JobManager(owner_id="before-api-restart")
+    try:
+        created = first.submit(
+            "score",
+            model_count=1,
+            has_ablation=False,
+            save=False,
+            runner=lambda progress, cancel: {
+                "mode": "score",
+                "top": [{"flow_id": "flow-42", "score": 0.88}],
+            },
+        )
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if first.get(created["job_id"])["status"] == "succeeded":
+                break
+            time.sleep(0.01)
+        assert first.get(created["job_id"])["status"] == "succeeded"
+    finally:
+        first.shutdown(wait=True)
+
+    restarted = JobManager(owner_id="after-api-restart")
+    monkeypatch.setattr(api_main, "JOBS", restarted)
+    try:
+        status = client.get(f"/api/jobs/{created['job_id']}")
+        assert status.status_code == 200
+        assert status.json()["status"] == "succeeded"
+        assert status.json()["result_available"] is True
+
+        result = client.get(f"/api/jobs/{created['job_id']}/result")
+        assert result.status_code == 200
+        assert result.json()["top"][0]["flow_id"] == "flow-42"
+    finally:
+        restarted.shutdown(wait=True)

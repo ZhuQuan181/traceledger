@@ -28,6 +28,7 @@ const STATUS_LABEL: Record<Job["status"], string> = {
   succeeded: "已完成",
   failed: "运行失败",
   cancelled: "已取消",
+  interrupted: "服务重启中断",
 };
 
 function elapsed(seconds: number) {
@@ -121,10 +122,10 @@ export function RunProgress({
 
       {active && (
         <p className="job-continuity">
-          关闭页面不会中断本机任务；刷新后会自动恢复进度。
+          关闭页面不会中断本机任务；刷新后可恢复进度，服务重启会把未完成任务标为中断。
         </p>
       )}
-      {job.status === "failed" && job.error && (
+      {(job.status === "failed" || job.status === "interrupted") && job.error && (
         <p className="job-error" role="alert">{job.error}</p>
       )}
 
@@ -163,6 +164,7 @@ function statusHeading(job: Job) {
   if (job.status === "succeeded") return "结果已写入本地历史";
   if (job.status === "failed") return "这次实验没有完成";
   if (job.status === "cancelled") return "任务已停止";
+  if (job.status === "interrupted") return "服务重启，任务已中断";
   if (job.phase === "model" || job.phase === "ablation") {
     return job.message;
   }

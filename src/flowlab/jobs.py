@@ -1,18 +1,22 @@
 """本地实验任务队列。
 
 只允许一个实验真正执行、最多再排一个，避免本机 CPU 与内存被多个
-scikit-learn 任务同时抢占。任务只保留进度摘要，完整结果写入历史库。
+scikit-learn 任务同时抢占。任务状态写入本地 SQLite，进程重启后可将
+悬空任务标为中断；实验正文写入历史库，无标签评分结果短期留在任务表。
 """
 
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import shutil
+import sqlite3
 import tempfile
 import threading
 import time
 import uuid
+import zlib
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -20,12 +24,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from flowlab.errors import ExperimentCancelled
-from flowlab.store import save_run
+from flowlab.store import connect, db_path, save_run
 
 logger = logging.getLogger(__name__)
 
 ACTIVE_STATUSES = {"queued", "running", "cancelling"}
-TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
+TERMINAL_STATUSES = {"succeeded", "failed", "cancelled", "interrupted"}
+RESULT_CODEC = "zlib-json-v1"
 
 PHASE_LABELS = {
     "loading": "读取数据",
@@ -85,6 +90,8 @@ class Job:
     finished_at: str | None = None
     _started_mono: float | None = None
     _elapsed_s: float = 0.0
+    _result_persisted: bool = field(default=False, repr=False)
+    _db_path: Path | None = field(default=None, repr=False)
     _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
     _future: Future | None = field(default=None, repr=False)
 
@@ -113,7 +120,7 @@ class Job:
             "run_id": self.run_id,
             "error": self.error,
             "has_ablation": self.has_ablation,
-            "result_available": self.result is not None,
+            "result_available": self.result is not None or self._result_persisted,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
@@ -129,13 +136,16 @@ class JobManager:
         max_active: int = 2,
         ttl_s: float = 30 * 60,
         executor: ThreadPoolExecutor | None = None,
+        owner_id: str | None = None,
     ) -> None:
         if max_active < 1:
             raise ValueError("max_active 至少为 1")
         self.max_active = max_active
         self.ttl_s = ttl_s
+        self.owner_id = owner_id or uuid.uuid4().hex
         self._jobs: dict[str, Job] = {}
         self._lock = threading.RLock()
+        self._loaded_paths: set[Path] = set()
         self._executor = executor or ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="flowlab-job"
         )
@@ -144,7 +154,157 @@ class JobManager:
     def make_workdir(self) -> Path:
         return Path(tempfile.mkdtemp(prefix="flowlab-job-"))
 
+    @staticmethod
+    def _from_row(row: sqlite3.Row, path: Path) -> Job:
+        return Job(
+            job_id=row["job_id"],
+            kind=row["kind"],
+            model_count=int(row["model_count"]),
+            has_ablation=bool(row["has_ablation"]),
+            save=bool(row["save"]),
+            workdir=Path(row["workdir"]) if row["workdir"] else None,
+            status=row["status"],
+            phase=row["phase"],
+            completed_models=int(row["completed_models"]),
+            total_models=int(row["total_models"]),
+            percent=int(row["percent"]),
+            message=row["message"],
+            error=row["error"],
+            run_id=row["run_id"],
+            created_at=row["created_at"],
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
+            _elapsed_s=float(row["elapsed_s"] or 0),
+            _result_persisted=row["result"] is not None,
+            _db_path=path,
+        )
+
+    def _ensure_loaded_locked(self) -> None:
+        """载入当前 FLOWLAB_HOME 的任务快照，并收口上一个进程的悬空任务。"""
+        path = db_path()
+        if path in self._loaded_paths:
+            return
+        self._loaded_paths.add(path)
+        try:
+            with connect(path) as conn:
+                rows = conn.execute("SELECT * FROM jobs").fetchall()
+        except sqlite3.Error:
+            logger.exception("无法读取持久化任务记录：%s", path)
+            self._loaded_paths.discard(path)
+            return
+
+        recovered: list[Job] = []
+        for row in rows:
+            job_id = row["job_id"]
+            if job_id in self._jobs:
+                continue
+            job = self._from_row(row, path)
+            self._jobs[job_id] = job
+            if job.active:
+                recovered.append(job)
+
+        for job in recovered:
+            job.status = "interrupted"
+            job.phase = "done"
+            job.finished_at = now_iso()
+            job.message = "服务重启，任务已中断"
+            job.error = "FlowLab 服务在任务完成前重启；这次任务没有写入不完整历史。"
+            self._discard(job)
+            self._persist_locked(job)
+
+    def _persist_locked(self, job: Job) -> None:
+        if job._db_path is None:
+            job._db_path = db_path()
+        result_blob = None
+        result_codec = None
+        if job.result is not None and not job.save:
+            try:
+                raw = json.dumps(
+                    job.result,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            except (TypeError, ValueError):
+                logger.exception("任务 %s 的结果无法序列化；仅保留在内存中", job.job_id)
+            else:
+                result_blob = zlib.compress(raw, level=6)
+                result_codec = RESULT_CODEC
+                job._result_persisted = True
+
+        job._elapsed_s = job.elapsed()
+        try:
+            with connect(job._db_path) as conn:
+                conn.execute(
+                    """INSERT INTO jobs (
+                      job_id, kind, status, phase, model_count, has_ablation, save,
+                      completed_models, total_models, percent, message, error, run_id,
+                      result_codec, result, workdir, owner_id, created_at, started_at,
+                      finished_at, updated_at, elapsed_s
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(job_id) DO UPDATE SET
+                      kind=excluded.kind,
+                      status=excluded.status,
+                      phase=excluded.phase,
+                      model_count=excluded.model_count,
+                      has_ablation=excluded.has_ablation,
+                      save=excluded.save,
+                      completed_models=excluded.completed_models,
+                      total_models=excluded.total_models,
+                      percent=excluded.percent,
+                      message=excluded.message,
+                      error=excluded.error,
+                      run_id=excluded.run_id,
+                      result_codec=CASE
+                        WHEN excluded.result IS NULL THEN jobs.result_codec
+                        ELSE excluded.result_codec
+                      END,
+                      result=COALESCE(excluded.result, jobs.result),
+                      workdir=excluded.workdir,
+                      owner_id=excluded.owner_id,
+                      created_at=excluded.created_at,
+                      started_at=excluded.started_at,
+                      finished_at=excluded.finished_at,
+                      updated_at=excluded.updated_at,
+                      elapsed_s=excluded.elapsed_s""",
+                    (
+                        job.job_id,
+                        job.kind,
+                        job.status,
+                        job.phase,
+                        job.model_count,
+                        bool(job.has_ablation),
+                        bool(job.save),
+                        job.completed_models,
+                        job.total_models,
+                        job.percent,
+                        job.message,
+                        job.error,
+                        job.run_id,
+                        result_codec,
+                        result_blob,
+                        str(job.workdir) if job.workdir is not None else None,
+                        self.owner_id,
+                        job.created_at,
+                        job.started_at,
+                        job.finished_at,
+                        now_iso(),
+                        job._elapsed_s,
+                    ),
+                )
+        except sqlite3.Error:
+            logger.exception("无法持久化任务 %s 的状态", job.job_id)
+
+    def _delete_locked(self, job: Job) -> None:
+        if job._db_path is None:
+            return
+        try:
+            with connect(job._db_path) as conn:
+                conn.execute("DELETE FROM jobs WHERE job_id = ?", (job.job_id,))
+        except sqlite3.Error:
+            logger.exception("无法清理任务记录 %s", job.job_id)
+
     def _prune_locked(self) -> None:
+        self._ensure_loaded_locked()
         if self.ttl_s < 0:
             return
         cutoff = time.time() - self.ttl_s
@@ -153,6 +313,7 @@ class JobManager:
                 finished = datetime.fromisoformat(job.finished_at).timestamp()
                 if finished < cutoff:
                     self._discard(job)
+                    self._delete_locked(job)
                     self._jobs.pop(job_id, None)
 
     def _discard(self, job: Job) -> None:
@@ -176,6 +337,7 @@ class JobManager:
         job.finished_at = now_iso()
         job._elapsed_s = elapsed
         self._discard(job)
+        self._persist_locked(job)
 
     def submit(
         self,
@@ -202,8 +364,10 @@ class JobManager:
                 save=save,
                 workdir=workdir,
                 total_models=model_count,
+                _db_path=db_path(),
             )
             self._jobs[job.job_id] = job
+            self._persist_locked(job)
             snapshot = job.snapshot()
             job._future = self._executor.submit(self._run, job.job_id, runner)
         return snapshot
@@ -216,8 +380,30 @@ class JobManager:
 
     def result(self, job_id: str) -> dict | None:
         with self._lock:
+            self._prune_locked()
             job = self._jobs.get(job_id)
-            return None if job is None else job.result
+            if job is None:
+                return None
+            if job.result is None and job._result_persisted and job._db_path is not None:
+                try:
+                    with connect(job._db_path) as conn:
+                        row = conn.execute(
+                            "SELECT result_codec, result FROM jobs WHERE job_id = ?",
+                            (job_id,),
+                        ).fetchone()
+                except sqlite3.Error:
+                    logger.exception("无法读取任务结果 %s", job_id)
+                    return None
+                if row and row["result"] is not None:
+                    if row["result_codec"] != RESULT_CODEC:
+                        logger.error("任务 %s 使用了未知结果编码 %s", job_id, row["result_codec"])
+                        return None
+                    try:
+                        job.result = json.loads(zlib.decompress(row["result"]))
+                    except (json.JSONDecodeError, zlib.error, UnicodeDecodeError):
+                        logger.exception("任务 %s 的结果无法解码", job_id)
+                        return None
+            return job.result
 
     def active(self) -> list[dict]:
         with self._lock:
@@ -232,6 +418,7 @@ class JobManager:
 
     def cancel(self, job_id: str) -> dict:
         with self._lock:
+            self._prune_locked()
             job = self._jobs.get(job_id)
             if job is None:
                 raise KeyError(job_id)
@@ -245,6 +432,7 @@ class JobManager:
             else:
                 job.status = "cancelling"
                 job.message = "正在取消；当前模型完成后停止"
+                self._persist_locked(job)
             return job.snapshot()
 
     def _run(self, job_id: str, runner: JobRunner) -> None:
@@ -258,6 +446,7 @@ class JobManager:
             job.percent = 1
             job.started_at = now_iso()
             job._started_mono = time.monotonic()
+            self._persist_locked(job)
 
         def progress(phase: str, completed: int, total: int) -> None:
             self._progress(job_id, phase, completed, total)
@@ -281,6 +470,7 @@ class JobManager:
                     current.phase = "report"
                     current.percent = max(current.percent, 98)
                     current.message = "写入本地历史"
+                    self._persist_locked(current)
             if job.save:
                 run_id = save_run(payload)
 
@@ -336,6 +526,7 @@ class JobManager:
             job.message = "正在取消；当前模型完成后停止" if job._cancel.is_set() else label
             if job._cancel.is_set():
                 job.status = "cancelling"
+            self._persist_locked(job)
 
     def shutdown(self, *, wait: bool = True) -> None:
         with self._lock:

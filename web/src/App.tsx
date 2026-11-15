@@ -467,7 +467,7 @@ export default function App() {
         transientFailures = 0;
         if (recovered) setError(null);
         setJob(next);
-        if (!["succeeded", "failed", "cancelled"].includes(next.status)) {
+        if (!["succeeded", "failed", "cancelled", "interrupted"].includes(next.status)) {
           timer = window.setTimeout(poll, 800);
           return;
         }
@@ -517,17 +517,18 @@ export default function App() {
       } catch (error) {
         if (disposed) return;
         const message = error instanceof Error ? error.message : String(error);
-        if (!message.includes("没有这个后台任务") && transientFailures < 4) {
-          transientFailures += 1;
-          setError(`后台进度暂时读取失败，正在重试（${transientFailures}/4）：${message}`);
-          timer = window.setTimeout(poll, 1500);
+        if (message.includes("没有这个后台任务")) {
+          clearStoredJob();
+          setJobId(null);
+          setError("本机任务记录已过期或不存在；请重新运行实验。");
           return;
         }
-        clearStoredJob();
-        setJobId(null);
-        setError(message.includes("没有这个后台任务")
-          ? "本机服务已重启，原后台任务记录已丢失；请重新运行实验。"
-          : `无法读取后台任务：${message}`);
+        transientFailures += 1;
+        const retryDelay = Math.min(5000, 800 * 2 ** Math.min(transientFailures - 1, 3));
+        setError(
+          `后台进度暂时读取失败，正在重连（第 ${transientFailures} 次）：${message}`
+        );
+        timer = window.setTimeout(poll, retryDelay);
       }
     }
 

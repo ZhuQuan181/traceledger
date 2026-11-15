@@ -13,8 +13,8 @@
 > **Turn network traffic anomaly detection research models into systems that run, reproduce, and explain.**
 
 - Created: 2026-11-11
-- Current version: **v0.9.0** (2026-11-15: local background jobs and refresh recovery, unlabeled scoring, upload preflight, compressed history and faster queries, browser E2E)
-- Tests: **192 backend tests + 31 frontend component tests + 4 Chromium E2E tests**; pcap tests require `tshark`
+- Current version: **v0.10.0** (2026-11-15: durable background jobs and crash recovery, short-lived score results, persistent reconnect)
+- Tests: **196 backend tests + 33 frontend component tests + 4 Chromium E2E tests**; pcap tests require `tshark`
 - Accessibility: core pages pass automated axe checks for serious/critical WCAG A/AA violations; this is not a full WCAG certification
 - Documentation: Chinese and English READMEs, with design docs in Chinese; code and interfaces are in English
 - Project site: https://zhuquan181.github.io/traceledger/en/
@@ -96,13 +96,13 @@ Shared flags: `--models mlp,iforest`, `--split temporal|random|group`, `--test-s
 - **Pages**: deploys the Chinese and English project sites plus a static sample report generated from synthetic data
 - **Local workbench**: GitHub Pages hosts the introduction only; the full Web UI needs the local Python backend (`flowlab serve`)
 
-## Highlights in v0.9
+## Highlights in v0.10
 
-- **Operable long-running jobs**: a local single-execution background queue exposes stage progress, queuing, cooperative cancellation, and refresh recovery; cancelled or failed jobs never write partial history.
-- **Unlabeled data is still useful**: upload data without a `label` column, scan it with an unsupervised model, and export the top-N suspicious flows. The UI separates scoring from supervised evaluation and does not report AUC/F1.
-- **Preflight before training**: inspect column mapping, missing/infinite values, timestamps, label coverage, and class counts after the three-way split. Blocking issues are separated from advisories.
-- **Scale and performance**: history payloads use zlib compression, SQLite uses WAL and indexes, history pages use aggregate queries, and larger JSON responses use GZip.
-- **Automated gates**: Playwright and axe browser tests now run alongside Python and frontend jobs in CI.
+- **Recoverable jobs**: job state is stored in SQLite schema v5. After a service restart, unfinished jobs are marked `interrupted` instead of appearing successful or writing partial history.
+- **Reviewable results**: saved experiments still reload by `run_id`; unlabeled scoring results are compressed into the job table for a short retention window, so refreshes and service restarts do not lose them.
+- **Reconnect instead of giving up**: the workbench retries the local service with exponential backoff and stops only on an explicit missing-job response, so longer service restarts do not erase the UI context.
+- **Bounded resources**: the queue still allows one running and one queued job; terminal jobs are pruned by TTL, and interrupted jobs clean up unfinished upload staging directories.
+- **Stricter gates**: each SQLite database initializes its schema once; Chromium E2E now fails on any API 5xx response.
 
 See the [optimization roadmap](docs/OPTIMIZATION-ROADMAP.md) for the next priorities and acceptance criteria.
 

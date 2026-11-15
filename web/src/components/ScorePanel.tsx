@@ -78,7 +78,7 @@ export function ScorePanel({ result }: { result: ScorePayload }) {
         <strong>这不是评估结果。</strong> {result.note}
         分数只表示在当前批次内的相对可疑度，不能当作概率或跨数据集阈值。
         <span className="score-retention">
-          排行只保留在当前服务进程；如需归档或交给他人复核，请先导出 CSV。
+          排行在本机保留 30 分钟；如需归档或交给他人复核，请先导出 CSV。
         </span>
       </div>
 

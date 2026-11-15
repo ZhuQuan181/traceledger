@@ -372,7 +372,7 @@ def active_jobs():
 def job_status(job_id: str):
     job = JOBS.get(job_id)
     if job is None:
-        raise HTTPException(404, "没有这个后台任务，服务重启后任务记录会丢失")
+        raise HTTPException(404, "没有这个后台任务，记录可能已过期或被清理")
     return job
 
 
@@ -392,7 +392,7 @@ def job_result(job_id: str):
     if job is None:
         raise HTTPException(404, "没有这个后台任务")
     if job["status"] != "succeeded":
-        raise HTTPException(409, "任务尚未成功完成")
+        raise HTTPException(409, f"任务尚未成功完成（当前状态：{job['status']}）")
     result = JOBS.result(job_id)
     if result is None:
         raise HTTPException(404, "结果已写入历史库，请通过 run_id 读取")

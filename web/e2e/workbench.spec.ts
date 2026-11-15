@@ -60,18 +60,36 @@ async function expectNoHorizontalOverflow(page: Page) {
   expect(overflow).toBeLessThanOrEqual(1);
 }
 
+function watchApiFailures(page: Page) {
+  const failures: string[] = [];
+  page.on("response", (response) => {
+    if (response.url().includes("/api/") && response.status() >= 500) {
+      failures.push(`${response.status()} ${response.url()}`);
+    }
+  });
+  return failures;
+}
+
+async function expectNoApiFailures(page: Page, failures: string[]) {
+  await page.waitForLoadState("networkidle");
+  expect(failures).toEqual([]);
+}
+
 test("landing page has no serious accessibility violations", async ({ page }) => {
   const errors: Error[] = [];
+  const apiFailures = watchApiFailures(page);
   page.on("pageerror", (error) => errors.push(error));
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: /先跑一次/ })).toBeVisible();
+  await expectNoApiFailures(page, apiFailures);
   await expectNoHorizontalOverflow(page);
   expect(await accessibilityViolations(page)).toEqual([]);
   expect(errors).toEqual([]);
 });
 
 test("upload preflight explains mapping and split coverage", async ({ page }) => {
+  const apiFailures = watchApiFailures(page);
   await page.goto("/");
   await page.getByText("上传文件", { exact: true }).click();
   await page.locator('input[name="flow-file"]').setInputFiles({
@@ -85,11 +103,13 @@ test("upload preflight explains mapping and split coverage", async ({ page }) =>
   await expect(page.getByText("数据与切分通过预检")).toBeVisible();
   await expect(page.getByRole("heading", { name: "切分后覆盖" })).toBeVisible();
   await expect(page.getByRole("button", { name: "开始完整评估" })).toBeEnabled();
+  await expectNoApiFailures(page, apiFailures);
   await expectNoHorizontalOverflow(page);
   expect(await accessibilityViolations(page)).toEqual([]);
 });
 
 test("mobile configuration drawer is keyboard closable and accessible", async ({ page }) => {
+  const apiFailures = watchApiFailures(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   const trigger = page.getByRole("button", { name: "配置", exact: true });
@@ -103,10 +123,12 @@ test("mobile configuration drawer is keyboard closable and accessible", async ({
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();
+  await expectNoApiFailures(page, apiFailures);
 });
 
 test("a small synthetic experiment completes and renders metrics", async ({ page }) => {
   const errors: Error[] = [];
+  const apiFailures = watchApiFailures(page);
   page.on("pageerror", (error) => errors.push(error));
   await page.goto("/");
 
@@ -121,5 +143,6 @@ test("a small synthetic experiment completes and renders metrics", async ({ page
   });
   await expect(page.getByText("验证集最佳")).toBeVisible();
   await expect(page.getByText("AUC", { exact: true }).first()).toBeVisible();
+  await expectNoApiFailures(page, apiFailures);
   expect(errors).toEqual([]);
 });

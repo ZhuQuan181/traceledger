@@ -8,12 +8,13 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import uuid
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 STATUSES = ("unreviewed", "baseline", "failed", "archived")
 PAYLOAD_CODEC = "zlib-json-v1"
 SCHEMA = """
@@ -45,6 +46,31 @@ CREATE TABLE IF NOT EXISTS runs (
   payload_raw_bytes INTEGER,
   payload       TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS jobs (
+  job_id           TEXT PRIMARY KEY,
+  kind             TEXT NOT NULL,
+  status           TEXT NOT NULL,
+  phase            TEXT NOT NULL,
+  model_count      INTEGER NOT NULL DEFAULT 0,
+  has_ablation     INTEGER NOT NULL DEFAULT 0,
+  save             INTEGER NOT NULL DEFAULT 1,
+  completed_models INTEGER NOT NULL DEFAULT 0,
+  total_models     INTEGER NOT NULL DEFAULT 0,
+  percent          INTEGER NOT NULL DEFAULT 0,
+  message          TEXT NOT NULL DEFAULT '',
+  error            TEXT,
+  run_id           TEXT,
+  result_codec     TEXT,
+  result           BLOB,
+  workdir          TEXT,
+  owner_id         TEXT NOT NULL,
+  created_at       TEXT NOT NULL,
+  started_at       TEXT,
+  finished_at      TEXT,
+  updated_at       TEXT NOT NULL,
+  elapsed_s        REAL NOT NULL DEFAULT 0
+);
 """
 
 INDEXES = """
@@ -53,6 +79,8 @@ CREATE INDEX IF NOT EXISTS idx_runs_status_created ON runs(status, created_at DE
 CREATE INDEX IF NOT EXISTS idx_runs_dataset_hash ON runs(dataset_hash);
 CREATE INDEX IF NOT EXISTS idx_runs_best_model ON runs(best_model);
 CREATE INDEX IF NOT EXISTS idx_runs_fingerprint ON runs(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_jobs_status_updated ON jobs(status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jobs_finished ON jobs(finished_at);
 """
 
 MIGRATION_COLUMNS = {
@@ -70,6 +98,8 @@ MIGRATION_COLUMNS = {
 }
 
 _models_cache: tuple[tuple[str, int, int], list[str]] | None = None
+_initialized_paths: set[Path] = set()
+_schema_lock = threading.Lock()
 
 
 def db_path() -> Path:
@@ -78,23 +108,28 @@ def db_path() -> Path:
     return home / "flowlab.db"
 
 
-def connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path(), timeout=5.0)
+def connect(path: Path | None = None) -> sqlite3.Connection:
+    target = path or db_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(target, timeout=5.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA temp_store = MEMORY")
     conn.execute("PRAGMA cache_size = -20000")
     conn.execute("PRAGMA wal_autocheckpoint = 256")
     conn.execute("PRAGMA journal_size_limit = 1048576")
-    conn.executescript(SCHEMA)
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
-    for name, definition in MIGRATION_COLUMNS.items():
-        if name not in columns:
-            conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {definition}")
-    conn.executescript(INDEXES)
-    conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    with _schema_lock:
+        if target not in _initialized_paths:
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.executescript(SCHEMA)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+            for name, definition in MIGRATION_COLUMNS.items():
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {definition}")
+            conn.executescript(INDEXES)
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            _initialized_paths.add(target)
     return conn
 
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from flowlab.jobs import JobManager, JobQueueFull
+from flowlab.jobs import JobManager, JobNotCancellable, JobQueueFull
 
 
 def wait_for(predicate, timeout=5.0):
@@ -18,7 +18,8 @@ def wait_for(predicate, timeout=5.0):
 
 
 @pytest.fixture
-def manager():
+def manager(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLOWLAB_HOME", str(tmp_path))
     queue = JobManager(max_active=2)
     yield queue
     queue.shutdown(wait=True)
@@ -133,3 +134,72 @@ def test_non_persisted_result_is_kept_for_polling(manager):
     )
     assert final["result_available"] is True
     assert manager.result(created["job_id"])["top"][0]["score"] == 0.9
+
+
+def test_finished_score_and_result_survive_manager_restart(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLOWLAB_HOME", str(tmp_path / "restart-home"))
+    first = JobManager(owner_id="before-restart")
+    try:
+        created = first.submit(
+            "score",
+            model_count=1,
+            has_ablation=False,
+            save=False,
+            runner=lambda progress, cancel: {
+                "mode": "score",
+                "top": [{"flow_id": "flow-7", "score": 0.93}],
+            },
+        )
+        wait_for(lambda: first.get(created["job_id"])["status"] == "succeeded")
+    finally:
+        first.shutdown(wait=True)
+
+    second = JobManager(owner_id="after-restart")
+    try:
+        restored = second.get(created["job_id"])
+        assert restored is not None
+        assert restored["status"] == "succeeded"
+        assert restored["result_available"] is True
+        assert second.result(created["job_id"])["top"][0]["flow_id"] == "flow-7"
+    finally:
+        second.shutdown(wait=True)
+
+
+def test_active_job_is_marked_interrupted_after_restart(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLOWLAB_HOME", str(tmp_path / "interrupted-home"))
+    gate = threading.Event()
+
+    def runner(progress, cancel):
+        progress("model", 1, 3)
+        gate.wait(5)
+        return {}
+
+    first = JobManager(owner_id="old-process")
+    try:
+        created = first.submit(
+            "test",
+            model_count=3,
+            has_ablation=False,
+            save=False,
+            runner=runner,
+        )
+        wait_for(lambda: first.get(created["job_id"])["status"] == "running")
+        wait_for(lambda: first.get(created["job_id"])["percent"] >= 28)
+
+        second = JobManager(owner_id="new-process")
+        try:
+            restored = second.get(created["job_id"])
+            assert restored is not None
+            assert restored["status"] == "interrupted"
+            assert restored["phase"] == "done"
+            assert restored["percent"] >= 28
+            assert "服务重启" in restored["message"]
+            assert "不完整历史" in restored["error"]
+            assert second.active() == []
+            with pytest.raises(JobNotCancellable):
+                second.cancel(created["job_id"])
+        finally:
+            second.shutdown(wait=True)
+    finally:
+        gate.set()
+        first.shutdown(wait=True)

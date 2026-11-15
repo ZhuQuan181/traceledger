@@ -218,14 +218,29 @@ false_negatives / source_ranking`。
    CI 使用独立 Chromium 任务。自动检查只覆盖关键页面的 serious/critical 规则，
    不等同完整 WCAG 认证。
 
-## 十二、剩余债务
+## 十二、v0.10 任务持久化与崩溃恢复
 
-1. **统计可信度**：尚未提供 bootstrap 置信区间、模型差值区间或时间块交叉验证。
-2. **特征贡献**：尚未接入 permutation importance / SHAP，报告无法给出原始列级贡献。
-3. **前端结构**：`styles.css` 仍是单文件，组件继续增加后应拆分为 tokens/layout/components。
-4. **远程模式**：没有内置鉴权；`--allow-remote` 只表示用户确认风险，不提供访问控制。
-5. **基准复现**：公开数据集与 pcap 端到端仍未进入固定 CI；`tshark` 路径目前以跳过为主。
-6. **浏览器覆盖**：E2E 目前只跑 Chromium；可访问性检查未覆盖屏幕阅读器和全部键盘路径，
+1. ✅ SQLite schema v5 新增 `jobs` 表，保存任务阶段、进度、所有者、时间戳、
+   `run_id`、临时目录和短期评分结果。
+2. ✅ 新进程载入任务表后，将遗留的排队/运行中任务标为 `interrupted`，
+   删除未完成的临时上传目录，并保留可解释的错误信息。
+3. ✅ `save=false` 的评分结果使用 zlib 压缩写入任务表，默认保留 30 分钟；
+   已保存实验只保留 `run_id`，正文仍由历史库负责。
+4. ✅ 前端使用指数退避持续重连；只有明确的任务 404 才清理本地 job id，
+   服务重启超过数秒也不会丢失恢复入口。
+5. ✅ SQLite schema 按数据库路径只初始化一次；并发连接先设置 busy timeout，
+   不再每次执行 `journal_mode`/DDL，避免任务写入与历史读取互相锁库。
+
+## 十三、剩余债务
+
+1. **计算恢复**：任务状态可以跨重启保留，但训练本身不会从中断的模型继续；
+   当前策略是标记中断并要求重跑，后续可增加模型边界 checkpoint。
+2. **统计可信度**：尚未提供 bootstrap 置信区间、模型差值区间或时间块交叉验证。
+3. **特征贡献**：尚未接入 permutation importance / SHAP，报告无法给出原始列级贡献。
+4. **前端结构**：`styles.css` 仍是单文件，组件继续增加后应拆分为 tokens/layout/components。
+5. **远程模式**：没有内置鉴权；`--allow-remote` 只表示用户确认风险，不提供访问控制。
+6. **基准复现**：公开数据集与 pcap 端到端仍未进入固定 CI；`tshark` 路径目前以跳过为主。
+7. **浏览器覆盖**：E2E 目前只跑 Chromium；可访问性检查未覆盖屏幕阅读器和全部键盘路径，
    Firefox/WebKit 仍需后续补测。
 
 下一步的优先级和验收标准见 [`OPTIMIZATION-ROADMAP.md`](OPTIMIZATION-ROADMAP.md)。

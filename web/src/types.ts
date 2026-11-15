@@ -312,7 +312,14 @@ export type Comparison = {
 
 export type ModelInfo = { name: string; kind: string };
 
-export type JobStatus = "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
+export type JobStatus =
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
 
 export type Job = {
   job_id: string;

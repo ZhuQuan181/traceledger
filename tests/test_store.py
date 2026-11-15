@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import threading
 from copy import deepcopy
 
 from flowlab import store
@@ -168,6 +169,31 @@ def test_payload_is_compressed_and_decoded_transparently(tmp_path, monkeypatch):
         "idx_runs_fingerprint",
     } <= indexes
     assert store.get_run(run_id)["payload"]["dataset"]["hash"] == "abc123"
+
+
+def test_concurrent_connections_share_one_schema_initialization(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLOWLAB_HOME", str(tmp_path))
+    barrier = threading.Barrier(8)
+    errors: list[BaseException] = []
+
+    def worker():
+        try:
+            barrier.wait()
+            for _ in range(20):
+                with store.connect() as conn:
+                    assert conn.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION
+                    conn.execute("SELECT COUNT(*) FROM jobs").fetchone()
+        except BaseException as exc:  # noqa: BLE001 - 子线程错误需要带回主线程断言
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert not any(thread.is_alive() for thread in threads)
+    assert errors == []
 
 
 def test_history_page_returns_counts_capacity_and_models_in_one_call(tmp_path, monkeypatch):

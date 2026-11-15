@@ -353,6 +353,47 @@ describe("App history restore", () => {
     expect(api.fetchJob).toHaveBeenCalledWith("job123456789");
   });
 
+  it("shows a persisted job as interrupted after the local service restarts", async () => {
+    window.localStorage.setItem("flowlab.active-job", "job123456789");
+    vi.mocked(api.fetchJob).mockResolvedValue({
+      ...runningJob,
+      status: "interrupted",
+      phase: "done",
+      message: "服务重启，任务已中断",
+      error: "FlowLab 服务在任务完成前重启；这次任务没有写入不完整历史。",
+      finished_at: "2026-11-15T09:01:00+08:00",
+    });
+    render(<App />);
+
+    expect((await screen.findAllByText("服务重启中断")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/没有写入不完整历史/).length).toBeGreaterThan(0);
+    expect(window.localStorage.getItem("flowlab.active-job")).toBeNull();
+  });
+
+  it("keeps reconnecting through a temporary local backend outage", async () => {
+    window.localStorage.setItem("flowlab.active-job", "job123456789");
+    vi.mocked(api.fetchJob)
+      .mockRejectedValueOnce(new Error("Failed to fetch"))
+      .mockResolvedValueOnce({
+        ...runningJob,
+        status: "interrupted",
+        phase: "done",
+        message: "服务重启，任务已中断",
+        error: "FlowLab 服务在任务完成前重启；这次任务没有写入不完整历史。",
+        finished_at: "2026-11-15T09:01:00+08:00",
+      });
+    render(<App />);
+
+    await waitFor(
+      () => expect(api.fetchJob).toHaveBeenCalledTimes(2),
+      { timeout: 3000 },
+    );
+    expect(
+      (await screen.findAllByText("服务重启中断", {}, { timeout: 3000 })).length
+    ).toBeGreaterThan(0);
+    expect(window.localStorage.getItem("flowlab.active-job")).toBeNull();
+  });
+
   it("scores an unlabeled upload without requiring evaluation labels", async () => {
     vi.mocked(api.fetchJob).mockResolvedValue({
       ...succeededJob,
@@ -374,7 +415,7 @@ describe("App history restore", () => {
 
     expect(await screen.findByRole("heading", { name: "无标签可疑度排行" })).toBeInTheDocument();
     expect(screen.getByText(/不计算 AUC、F1 或误报率/)).toBeInTheDocument();
-    expect(screen.getByText(/排行只保留在当前服务进程/)).toBeInTheDocument();
+    expect(screen.getByText(/排行在本机保留 30 分钟/)).toBeInTheDocument();
     expect(api.createScoreJob).toHaveBeenCalledWith(file, "iforest", 20, false);
     expect(api.fetchJobResult).toHaveBeenCalledWith("job123456789");
 
