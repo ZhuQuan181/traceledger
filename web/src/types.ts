@@ -308,3 +308,23 @@ export type Comparison = {
 };
 
 export type ModelInfo = { name: string; kind: string };
+
+export type JobStatus = "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
+
+export type Job = {
+  job_id: string;
+  kind: "demo" | "upload" | "test";
+  status: JobStatus;
+  phase: "queued" | "loading" | "validating" | "features" | "model" | "ablation" | "report" | "done";
+  completed_models: number;
+  total_models: number;
+  percent: number;
+  message: string;
+  elapsed_s: number;
+  run_id: string | null;
+  error: string | null;
+  has_ablation: boolean;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};

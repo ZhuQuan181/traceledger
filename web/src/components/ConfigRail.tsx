@@ -1,4 +1,5 @@
-import type { ModelInfo } from "../types";
+import type { Job, ModelInfo } from "../types";
+import { RunProgress } from "./RunProgress";
 
 type Props = {
   models: ModelInfo[];
@@ -24,6 +25,10 @@ type Props = {
   labelsFile: File | null; onLabelsFile: (f: File | null) => void;
   allowPickle: boolean; onAllowPickle: (v: boolean) => void;
   busy: boolean; onRun: () => void; error: string | null; notice: string | null;
+  job: Job | null;
+  cancelBusy: boolean;
+  onCancelJob: () => void | Promise<void>;
+  onDismissJob: () => void;
   stale?: boolean;
   onCloseMobile: () => void;
   mobileOpen: boolean;
@@ -208,9 +213,21 @@ export function ConfigRail(p: Props) {
       </section>
 
       <section className="rail-run">
+        {p.job && (
+          <RunProgress
+            job={p.job}
+            compact
+            cancelBusy={p.cancelBusy}
+            onCancel={p.onCancelJob}
+            onDismiss={p.onDismissJob}
+          />
+        )}
         <button className="run" onClick={p.onRun}
                 disabled={p.busy || p.selected.length === 0 || (p.source === "file" && !p.file)}>
-          {p.busy ? "实验进行中…" : p.stale ? "按新配置运行" : "运行实验"}
+          {p.job?.status === "running" || p.job?.status === "cancelling"
+            ? "实验进行中…"
+            : p.job?.status === "queued" ? "已排队…"
+            : p.stale ? "按新配置运行" : "运行实验"}
         </button>
         {p.notice && <p className="notice" role="status">{p.notice}</p>}
         {p.error && <p className="error" role="alert">{p.error}</p>}

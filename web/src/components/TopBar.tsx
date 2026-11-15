@@ -1,9 +1,10 @@
-import type { Payload, RunRow } from "../types";
+import type { Job, Payload, RunRow } from "../types";
 import { RunTimeline } from "./RunTimeline";
 
 export function TopBar({
   payload,
   busy,
+  job,
   runs,
   activeRun,
   onOpenRun,
@@ -14,6 +15,7 @@ export function TopBar({
 }: {
   payload: Payload | null;
   busy: boolean;
+  job: Job | null;
   runs: RunRow[];
   activeRun?: string;
   onOpenRun: (id: string) => void;
@@ -58,7 +60,11 @@ export function TopBar({
           </button>
         </nav>
         <span className="idle" role="status" aria-live="polite">
-          {busy ? "运行中…" : payload ? (payload.run_id ?? "已就绪") : "未运行"}
+          {job?.status === "queued"
+            ? "排队中"
+            : job && ["running", "cancelling"].includes(job.status)
+              ? `${job.message} · ${job.percent}%`
+              : busy ? "准备中…" : payload ? (payload.run_id ?? "已就绪") : "未运行"}
         </span>
       </div>
     </header>

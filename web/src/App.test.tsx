@@ -3,18 +3,21 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import App from "./App";
-import type { Payload, RunRow } from "./types";
+import type { Job, Payload, RunRow } from "./types";
 
 vi.mock("./api", () => ({
+  cancelJob: vi.fn(),
+  createDemoJob: vi.fn(),
+  createUploadJob: vi.fn(),
+  fetchActiveJobs: vi.fn(),
   fetchComparison: vi.fn(),
+  fetchJob: vi.fn(),
   fetchModels: vi.fn(),
   fetchHistory: vi.fn(),
   fetchHistoryPage: vi.fn(),
   deleteRun: vi.fn(),
   pruneHistory: vi.fn(),
   loadRun: vi.fn(),
-  runDemo: vi.fn(),
-  runUpload: vi.fn(),
   updateRunMeta: vi.fn(),
 }));
 
@@ -111,10 +114,42 @@ const payload = {
   report_html: "<html></html>",
 } as Payload;
 
+const runningJob: Job = {
+  job_id: "job123456789",
+  kind: "demo",
+  status: "running",
+  phase: "model",
+  completed_models: 1,
+  total_models: 3,
+  percent: 42,
+  message: "训练与评分",
+  elapsed_s: 3.2,
+  run_id: null,
+  error: null,
+  has_ablation: false,
+  created_at: "2026-11-15T09:00:00+08:00",
+  started_at: "2026-11-15T09:00:01+08:00",
+  finished_at: null,
+};
+
+const succeededJob: Job = {
+  ...runningJob,
+  status: "succeeded",
+  phase: "done",
+  completed_models: 3,
+  percent: 100,
+  message: "实验完成，结果已保存",
+  run_id: "abc123",
+  finished_at: "2026-11-15T09:00:08+08:00",
+};
+
 describe("App history restore", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
     vi.mocked(api.fetchModels).mockResolvedValue([{ name: "mlp", kind: "supervised" }]);
     vi.mocked(api.fetchHistory).mockResolvedValue([run]);
+    vi.mocked(api.fetchActiveJobs).mockResolvedValue([]);
     vi.mocked(api.fetchHistoryPage).mockResolvedValue({
       runs: [{ ...run, note: "removed dst_port", status: "unreviewed" }],
       total: 1,
@@ -123,6 +158,10 @@ describe("App history restore", () => {
       models: ["mlp"],
     });
     vi.mocked(api.loadRun).mockResolvedValue(payload);
+    vi.mocked(api.createDemoJob).mockResolvedValue(runningJob);
+    vi.mocked(api.createUploadJob).mockResolvedValue({ ...runningJob, kind: "upload" });
+    vi.mocked(api.fetchJob).mockResolvedValue(succeededJob);
+    vi.mocked(api.cancelJob).mockResolvedValue({ ...runningJob, status: "cancelling" });
   });
 
   it("restores parameters and refuses to silently rerun an unavailable uploaded file", async () => {
@@ -140,7 +179,7 @@ describe("App history restore", () => {
   });
 
   it("shows a failed run outside the mobile configuration drawer", async () => {
-    vi.mocked(api.runDemo).mockRejectedValue(new Error("数据校验失败"));
+    vi.mocked(api.createDemoJob).mockRejectedValue(new Error("数据校验失败"));
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "用当前配置跑一次" }));
@@ -151,14 +190,14 @@ describe("App history restore", () => {
   });
 
   it("does not start a second experiment while one is in flight", async () => {
-    vi.mocked(api.runDemo).mockResolvedValue(payload);
     render(<App />);
     const run = await screen.findByRole("button", { name: "用当前配置跑一次" });
 
     fireEvent.click(run);
     fireEvent.click(run);
 
-    await waitFor(() => expect(api.runDemo).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.createDemoJob).toHaveBeenCalledTimes(1));
+    expect(api.createUploadJob).not.toHaveBeenCalled();
   });
 
   it("marks results stale after the configuration changes", async () => {
@@ -173,7 +212,7 @@ describe("App history restore", () => {
         leaky: false,
       },
     } as Payload;
-    vi.mocked(api.runDemo).mockResolvedValue(demoPayload);
+    vi.mocked(api.loadRun).mockResolvedValue(demoPayload);
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "用当前配置跑一次" }));
@@ -183,6 +222,37 @@ describe("App history restore", () => {
       target: { value: "0.6" },
     });
     expect(screen.getByText(/当前配置已修改/)).toBeInTheDocument();
+  });
+
+  it("shows live job progress and requires confirmation before cancelling", async () => {
+    vi.mocked(api.fetchJob).mockResolvedValue(runningJob);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "用当前配置跑一次" }));
+
+    const progressbars = await screen.findAllByRole("progressbar", { name: "实验完成度" });
+    expect(progressbars[0]).toHaveAttribute("aria-valuenow", "42");
+    await user.click(screen.getAllByRole("button", { name: "取消实验" })[0]);
+    expect(screen.getByRole("button", { name: "确认取消" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "确认取消" }));
+    await waitFor(() => expect(api.cancelJob).toHaveBeenCalledWith("job123456789"));
+  });
+
+  it("restores an active job after a page refresh", async () => {
+    window.localStorage.setItem("flowlab.active-job", "job123456789");
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "01 模型对比" })).toBeInTheDocument();
+    expect(api.fetchJob).toHaveBeenCalledWith("job123456789");
+    expect(window.localStorage.getItem("flowlab.active-job")).toBeNull();
+  });
+
+  it("recovers a queued job from the API when local storage is unavailable", async () => {
+    vi.mocked(api.fetchActiveJobs).mockResolvedValue([{ ...runningJob, status: "queued" }]);
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "01 模型对比" })).toBeInTheDocument();
+    expect(api.fetchJob).toHaveBeenCalledWith("job123456789");
   });
 
   it("exposes the mobile configuration panel as a modal dialog", async () => {

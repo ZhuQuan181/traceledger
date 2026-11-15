@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  cancelJob,
+  createDemoJob,
+  createUploadJob,
+  fetchActiveJobs,
   fetchComparison,
   fetchHistory,
+  fetchJob,
   fetchModels,
   loadRun,
-  runDemo,
-  runUpload,
 } from "./api";
 import { num, pct } from "./format";
-import type { Comparison, ModelInfo, Payload, RunRow } from "./types";
+import type { Comparison, Job, ModelInfo, Payload, RunRow } from "./types";
 import { TopBar } from "./components/TopBar";
 import { ConfigRail } from "./components/ConfigRail";
 import { ContextPanel } from "./components/ContextPanel";
@@ -24,8 +27,10 @@ import { ThresholdScan } from "./components/ThresholdScan";
 import { ComparePanel } from "./components/ComparePanel";
 import { DiagnosticCurves } from "./components/DiagnosticCurves";
 import { HistoryPanel } from "./components/HistoryPanel";
+import { RunProgress } from "./components/RunProgress";
 
 const ALL = ["mlp", "iforest", "autoencoder"];
+const JOB_STORAGE_KEY = "flowlab.active-job";
 type MobilePanel = "config" | "context" | null;
 
 function configSignature(config: {
@@ -101,7 +106,11 @@ export default function App() {
   const [allowPickle, setAllowPickle] = useState(false);
   const [payload, setPayload] = useState<Payload | null>(null);
   const [history, setHistory] = useState<RunRow[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [startingJob, setStartingJob] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [historyNotice, setHistoryNotice] = useState<string | null>(null);
@@ -114,6 +123,8 @@ export default function App() {
   const [compareBusy, setCompareBusy] = useState(false);
   const [compareError, setCompareError] = useState<string | null>(null);
   const requestInFlight = useRef(false);
+  const jobActive = Boolean(job && ["queued", "running", "cancelling"].includes(job.status));
+  const busy = jobActive || historyBusy || startingJob;
 
   useEffect(() => {
     fetchModels().then((items) => {
@@ -124,6 +135,19 @@ export default function App() {
       setConnectionError("无法连接本地 FlowLab 后端；当前配置只是占位，运行实验仍会失败。");
     });
     refreshHistory();
+    const savedJob = window.localStorage.getItem(JOB_STORAGE_KEY);
+    if (savedJob) {
+      setJobId(savedJob);
+    } else {
+      fetchActiveJobs().then((jobs) => {
+        const current = jobs.find((item) =>
+          ["queued", "running", "cancelling"].includes(item.status));
+        if (!current) return;
+        setJob(current);
+        setJobId(current.job_id);
+        window.localStorage.setItem(JOB_STORAGE_KEY, current.job_id);
+      }).catch(() => undefined);
+    }
   }, []);
 
   useEffect(() => {
@@ -213,16 +237,6 @@ export default function App() {
       if (previousFocus?.isConnected) previousFocus.focus();
     };
   }, [compareOpen]);
-
-  useEffect(() => {
-    if (!busy) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [busy]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 900px)");
@@ -403,8 +417,73 @@ export default function App() {
     restoreConfig(data, restoreSource);
   }
 
+  useEffect(() => {
+    if (!jobId) return;
+    let disposed = false;
+    let timer: number | undefined;
+    let transientFailures = 0;
+
+    const clearStoredJob = () => {
+      window.localStorage.removeItem(JOB_STORAGE_KEY);
+    };
+
+    async function poll() {
+      try {
+        const next = await fetchJob(jobId!);
+        if (disposed) return;
+        const recovered = transientFailures > 0;
+        transientFailures = 0;
+        if (recovered) setError(null);
+        setJob(next);
+        if (!["succeeded", "failed", "cancelled"].includes(next.status)) {
+          timer = window.setTimeout(poll, 800);
+          return;
+        }
+
+        clearStoredJob();
+        if (next.status === "succeeded" && next.run_id) {
+          try {
+            const data = await loadRun(next.run_id);
+            if (disposed) return;
+            applyPayload(data, data.experiment?.ablate ?? undefined);
+            setConnectionError(null);
+            refreshHistory();
+            revealResults();
+            setJob(null);
+          } catch (error) {
+            if (disposed) return;
+            setError(error instanceof Error ? error.message : String(error));
+          }
+        } else if (next.status === "succeeded") {
+          setError("实验完成，但没有可读取的历史记录。");
+        }
+        setJobId(null);
+      } catch (error) {
+        if (disposed) return;
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.includes("没有这个后台任务") && transientFailures < 4) {
+          transientFailures += 1;
+          setError(`后台进度暂时读取失败，正在重试（${transientFailures}/4）：${message}`);
+          timer = window.setTimeout(poll, 1500);
+          return;
+        }
+        clearStoredJob();
+        setJobId(null);
+        setError(message.includes("没有这个后台任务")
+          ? "本机服务已重启，原后台任务记录已丢失；请重新运行实验。"
+          : `无法读取后台任务：${message}`);
+      }
+    }
+
+    void poll();
+    return () => {
+      disposed = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [jobId]);
+
   async function run(override?: { ablate?: string }) {
-    if (requestInFlight.current) return;
+    if (requestInFlight.current || jobActive) return;
     if (selected.length === 0) {
       setError("至少选择一个模型。");
       return;
@@ -430,8 +509,11 @@ export default function App() {
       return;
     }
     requestInFlight.current = true;
-    setBusy(true);
+    setStartingJob(true);
     setError(null);
+    setJob(null);
+    setJobId(null);
+    window.localStorage.removeItem(JOB_STORAGE_KEY);
     setMobilePanel(null);
     try {
       const ablateValue = override?.ablate ?? ablate;
@@ -441,25 +523,24 @@ export default function App() {
         target_fpr: targetFpr,
         ablate: ablateValue || null,
       };
-      const data = source === "demo"
-        ? await runDemo({ ...params, normal, attack, leaky })
-        : await runUpload(file!, params, labelsFile, allowPickle);
-      applyPayload(data, ablateValue);
-      setConnectionError(null);
-      refreshHistory();
-      revealResults();
+      const created = source === "demo"
+        ? await createDemoJob({ ...params, normal, attack, leaky })
+        : await createUploadJob(file!, params, labelsFile, allowPickle);
+      setJob(created);
+      setJobId(created.job_id);
+      window.localStorage.setItem(JOB_STORAGE_KEY, created.job_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       requestInFlight.current = false;
-      setBusy(false);
+      setStartingJob(false);
     }
   }
 
   async function openRun(id: string) {
-    if (requestInFlight.current) return;
+    if (requestInFlight.current || jobActive) return;
     requestInFlight.current = true;
-    setBusy(true);
+    setHistoryBusy(true);
     setError(null);
     setMobilePanel(null);
     try {
@@ -469,8 +550,31 @@ export default function App() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       requestInFlight.current = false;
-      setBusy(false);
+      setHistoryBusy(false);
     }
+  }
+
+  async function cancelCurrentJob() {
+    if (!job || cancelBusy) return;
+    setCancelBusy(true);
+    setError(null);
+    try {
+      const next = await cancelJob(job.job_id);
+      setJob(next);
+      if (!["queued", "running", "cancelling"].includes(next.status)) {
+        setJobId(null);
+        window.localStorage.removeItem(JOB_STORAGE_KEY);
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCancelBusy(false);
+    }
+  }
+
+  function dismissJob() {
+    if (jobActive) return;
+    setJob(null);
   }
 
   function toggleModel(name: string) {
@@ -546,7 +650,7 @@ export default function App() {
   return (
     <div className={`shell mobile-panel-${mobilePanel ?? "none"}`}>
       <a className="skip" href="#main">跳到主要内容</a>
-      <TopBar payload={payload} busy={busy} runs={history} activeRun={payload?.run_id}
+      <TopBar payload={payload} busy={busy} job={job} runs={history} activeRun={payload?.run_id}
               onOpenRun={openRun} mobilePanel={mobilePanel}
               onOpenPanel={(panel) => setMobilePanel((current) => current === panel ? null : panel)}
               onCompare={openCompare} onHistory={openHistory} />
@@ -583,11 +687,29 @@ export default function App() {
           labelsFile={labelsFile} onLabelsFile={setLabelsFile}
           allowPickle={allowPickle} onAllowPickle={setAllowPickle}
           busy={busy} onRun={() => run()} error={error} notice={historyNotice} stale={stale}
+          job={job} cancelBusy={cancelBusy}
+          onCancelJob={cancelCurrentJob} onDismissJob={dismissJob}
           onCloseMobile={() => setMobilePanel(null)}
           mobileOpen={mobilePanel === "config"}
         />
 
         <main className="canvas" id="main">
+          {job && (
+            <RunProgress
+              job={job}
+              cancelBusy={cancelBusy}
+              onCancel={cancelCurrentJob}
+              onDismiss={dismissJob}
+            />
+          )}
+          {!payload && jobActive && (
+            <aside className="job-standby" aria-label="后台运行提示">
+              <span>实验在后台运行</span>
+              <p>
+                完成后会自动载入结果并写入本机历史。可以刷新页面，或先打开顶部“历史”查看其他实验。
+              </p>
+            </aside>
+          )}
           {connectionError && (
             <div className="connection-warning" role="status">
               {connectionError} 请在本机运行 <code>uv run flowlab serve</code>。

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Literal
@@ -20,6 +21,7 @@ from starlette.concurrency import run_in_threadpool
 
 from flowlab import __version__
 from flowlab.compare import load_comparison
+from flowlab.jobs import JOBS, JobNotCancellable, JobQueueFull
 from flowlab.models.registry import available
 from flowlab.pipeline import load_frame
 from flowlab.service import ExperimentSpec, demo_frame, execute
@@ -152,7 +154,7 @@ async def guard_local_api(request: Request, call_next):
                     status_code=403,
                 )
             )
-    if request.url.path == "/api/upload":
+    if request.url.path in {"/api/upload", "/api/jobs/upload"}:
         # multipart 有两份可选文件（数据 + 标签），给协议开销留 1 MB 余量。
         max_body = MAX_UPLOAD_BYTES * 2 + 1024 * 1024
         declared = _content_length(request)
@@ -213,6 +215,12 @@ class DemoRequest(BaseModel):
     ablate: str | None = None
     leaky: bool = False
     save: bool = True
+
+
+class JobDemoRequest(DemoRequest):
+    """后台任务只接受可保存的请求，前端用 run_id 获取完整结果。"""
+
+    save: Literal[True] = True
 
 
 class HistoryUpdate(BaseModel):
@@ -280,6 +288,66 @@ def demo(req: DemoRequest):
     if req.save:
         payload["run_id"] = save_run(payload)
     return payload
+
+
+@app.post("/api/jobs/demo", status_code=202)
+def demo_job(req: JobDemoRequest):
+    _validate(req.models)
+
+    def runner(progress, cancel):
+        progress("loading", 0, 1)
+        df, meta, source = demo_frame(req.normal, req.attack, req.seed, req.leaky)
+        progress("loading", 1, 1)
+        spec = ExperimentSpec(
+            models=req.models,
+            split=req.split,
+            seed=req.seed,
+            threshold=req.threshold,
+            threshold_mode=req.threshold_mode,
+            target_fpr=req.target_fpr,
+            test_size=req.test_size,
+            validation_size=req.validation_size,
+            ablate=req.ablate,
+            source_kind="demo",
+            normal=req.normal,
+            attack=req.attack,
+            leaky=req.leaky,
+        )
+        return execute(df, meta, source, spec, progress=progress, cancel=cancel)
+
+    try:
+        return JOBS.submit(
+            "demo",
+            model_count=len(set(req.models)),
+            has_ablation=bool(req.ablate),
+            save=True,
+            runner=runner,
+        )
+    except JobQueueFull as exc:
+        raise HTTPException(429, str(exc)) from exc
+
+
+@app.get("/api/jobs/active")
+def active_jobs():
+    return {"jobs": JOBS.active()}
+
+
+@app.get("/api/jobs/{job_id}")
+def job_status(job_id: str):
+    job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, "没有这个后台任务，服务重启后任务记录会丢失")
+    return job
+
+
+@app.delete("/api/jobs/{job_id}")
+def job_cancel(job_id: str):
+    try:
+        return JOBS.cancel(job_id)
+    except KeyError as exc:
+        raise HTTPException(404, "没有这个后台任务") from exc
+    except JobNotCancellable as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.post("/api/upload")
@@ -387,6 +455,131 @@ async def upload(
     if save:
         payload["run_id"] = save_run(payload)
     return payload
+
+
+@app.post("/api/jobs/upload", status_code=202)
+async def upload_job(
+    file: UploadFile = File(...),
+    labels: UploadFile | None = File(None),
+    split: str = Form("temporal"),
+    models: str = Form("mlp,iforest,autoencoder"),
+    threshold: float = Form(0.5),
+    threshold_mode: str = Form("fixed"),
+    target_fpr: float = Form(0.01),
+    seed: int = Form(42),
+    test_size: float = Form(0.3),
+    validation_size: float = Form(0.2),
+    ablate: str = Form(""),
+    allow_pickle: bool = Form(False),
+    pickle_token: str | None = Header(None, alias="X-FlowLab-Pickle-Token"),
+):
+    mlist = list(dict.fromkeys(m.strip() for m in models.split(",") if m.strip()))
+    _validate(mlist)
+    if split not in {"temporal", "random", "group"}:
+        raise HTTPException(400, "split 只能是 temporal、random 或 group")
+    if not 0 <= threshold <= 1:
+        raise HTTPException(400, "threshold 应在 0~1 之间")
+    if threshold_mode not in {"fixed", "f1", "fpr"}:
+        raise HTTPException(400, "threshold_mode 只能是 fixed、f1 或 fpr")
+    if not 0 < target_fpr < 1:
+        raise HTTPException(400, "target_fpr 应在 0~1 之间")
+    if not 0.05 <= test_size <= 0.5:
+        raise HTTPException(400, "test_size 应在 0.05~0.5 之间")
+    if not 0.05 <= validation_size <= 0.4:
+        raise HTTPException(400, "validation_size 应在 0.05~0.4 之间")
+    if test_size + validation_size > 0.8:
+        raise HTTPException(400, "test_size + validation_size 不能超过 0.8")
+    if not 0 <= seed <= 2**32 - 1:
+        raise HTTPException(400, "seed 超出允许范围")
+    if allow_pickle:
+        _check_pickle_token(pickle_token)
+    _check_upload_size(file, "数据文件")
+    if not JOBS.can_accept():
+        raise HTTPException(429, "本机已有一个实验在运行、另一个在排队；请等待或先取消排队任务。")
+
+    workdir = JOBS.make_workdir()
+    try:
+        name = file.filename or "upload"
+        label_original = labels.filename if labels is not None else None
+        safe_name = Path(name).name or "upload.csv"
+        data_path = workdir / f"data-{safe_name}"
+        if await _save_upload(file, data_path, "数据文件") == 0:
+            raise HTTPException(400, "文件为空")
+        label_path = None
+        if labels is not None:
+            _check_upload_size(labels, "标签文件")
+            label_name = Path(labels.filename or "labels.csv").name or "labels.csv"
+            candidate = workdir / f"labels-{label_name}"
+            if await _save_upload(labels, candidate, "标签文件"):
+                label_path = candidate
+
+        def runner(progress, cancel):
+            from flowlab.ingest.pcap import PcapUnavailable
+
+            progress("loading", 0, 1)
+            try:
+                loaded = load_frame(
+                    data_path,
+                    label_path,
+                    allow_pickle=allow_pickle,
+                )
+            except PcapUnavailable as exc:
+                raise ValueError(str(exc)) from exc
+            except Exception as exc:  # noqa: BLE001 - 后台任务边界统一转成用户提示
+                raise ValueError(f"读取失败：{exc}") from exc
+            progress("loading", 1, 1)
+            meta = loaded.meta()
+            if labels is not None and meta.get("labels", {}).get("file"):
+                meta["labels"]["file"] = label_original
+            spec = ExperimentSpec(
+                models=mlist,
+                split=split,
+                seed=seed,
+                threshold=threshold,
+                threshold_mode=threshold_mode,
+                target_fpr=target_fpr,
+                test_size=test_size,
+                validation_size=validation_size,
+                ablate=ablate or None,
+                source_kind="upload",
+                source_ref=name,
+            )
+            payload = execute(
+                loaded.df,
+                meta,
+                name,
+                spec,
+                progress=progress,
+                cancel=cancel,
+            )
+            if allow_pickle:
+                payload["warnings"].append(
+                    {
+                        "rule": "pickle_unsafe",
+                        "columns": [],
+                        "severity": "medium",
+                        "message": (
+                            "该文件以 pickle 加载，反序列化会执行代码；请只加载自己生成的文件。"
+                        ),
+                        "suggestion": "分享数据时优先用 parquet / npz / csv。",
+                    }
+                )
+            return payload
+
+        try:
+            return JOBS.submit(
+                "upload",
+                model_count=len(mlist),
+                has_ablation=bool(ablate),
+                save=True,
+                runner=runner,
+                workdir=workdir,
+            )
+        except JobQueueFull as exc:
+            raise HTTPException(429, str(exc)) from exc
+    except Exception:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise
 
 
 @app.get("/api/history")

@@ -1,6 +1,8 @@
 import pytest
 
 from flowlab.engineer import add_engineered_features
+from flowlab.eval.ablation import ablate
+from flowlab.eval.runner import EvalResult
 from flowlab.schema import normalize_columns
 from flowlab.service import ExperimentSpec, demo_frame, execute
 from flowlab.synthetic import generate
@@ -52,3 +54,35 @@ def test_invalid_target_fpr_is_rejected_before_training():
             "test",
             ExperimentSpec(models=["mlp"], threshold_mode="fpr", target_fpr=0),
         )
+
+
+def test_ablation_reuses_the_baseline_instead_of_training_it_twice(monkeypatch):
+    import flowlab.eval.ablation as ablation_module
+
+    df = add_engineered_features(normalize_columns(generate(200, 40, seed=3)))
+    baseline = [
+        EvalResult(
+            model="mlp",
+            kind="supervised",
+            metrics={"auc": 0.9},
+            confusion={},
+            duration_s=0.01,
+        )
+    ]
+    calls = []
+
+    def fake_run(frame, **kwargs):
+        calls.append(frame)
+        return baseline, []
+
+    monkeypatch.setattr(ablation_module, "run_experiment", fake_run)
+    result = ablate(
+        df,
+        "dst_port",
+        base_results=baseline,
+        models=["mlp"],
+        split="temporal",
+    )
+    assert len(calls) == 1
+    assert "dst_port" not in calls[0].columns
+    assert result.with_column is baseline

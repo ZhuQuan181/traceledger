@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics import confusion_matrix
 
+from flowlab.errors import ExperimentCancelled
 from flowlab.eval.metrics import (
     choose_threshold_f1,
     choose_threshold_fpr,
@@ -22,6 +24,19 @@ from flowlab.features.leakage import detect
 from flowlab.features.prepare import build_matrix_splits
 from flowlab.models.registry import available, create
 from flowlab.schema import is_benign
+
+ProgressCallback = Callable[[str, int, int], None]
+CancelCallback = Callable[[], bool]
+
+
+def _notify(progress: ProgressCallback | None, phase: str, completed: int, total: int) -> None:
+    if progress is not None:
+        progress(phase, completed, total)
+
+
+def _check_cancel(cancel: CancelCallback | None) -> None:
+    if cancel is not None and cancel():
+        raise ExperimentCancelled
 
 
 def _missing_labels(labels: pd.Series) -> pd.Series:
@@ -235,7 +250,10 @@ def run_experiment(
     label_col: str = "label",
     explain: bool = False,
     top_k: int = 20,
+    progress: ProgressCallback | None = None,
+    cancel: CancelCallback | None = None,
 ) -> tuple[list[EvalResult], list[dict]]:
+    _check_cancel(cancel)
     if models is None:
         models = ["mlp", "iforest", "autoencoder"]
     models = list(dict.fromkeys(models))
@@ -262,6 +280,8 @@ def run_experiment(
             f"标签列有 {int(missing.sum())} 行缺失或为空（示例: {examples}）。"
             "未标注的流不能被当作攻击样本；请补齐标签或先过滤这些行。"
         )
+    _notify(progress, "validating", 1, 1)
+    _check_cancel(cancel)
 
     plan = plan_split(
         df,
@@ -341,12 +361,15 @@ def run_experiment(
     dh = dataset_hash(df)
 
     train_idx, validation_idx, test_idx = plan.train, plan.validation, plan.test
+    _notify(progress, "features", 0, 1)
     prep_tr, prep_val, prep_te = build_matrix_splits(
         df.loc[train_idx],
         df.loc[validation_idx],
         df.loc[test_idx],
         label_col=label_col,
     )
+    _notify(progress, "features", 1, 1)
+    _check_cancel(cancel)
 
     if (prep_tr.y == 1).sum() == 0 and any(create(n).kind == "supervised" for n in models):
         raise ValueError(
@@ -355,7 +378,9 @@ def run_experiment(
         )
 
     results: list[EvalResult] = []
-    for name in models:
+    for position, name in enumerate(models):
+        _check_cancel(cancel)
+        _notify(progress, "model", position, len(models))
         t0 = time.perf_counter()
         det = _create_detector(name, seed)
         det.fit(prep_tr.X, prep_tr.y)
@@ -498,4 +523,6 @@ def run_experiment(
                 split_diagnostics=diagnostics,
             )
         )
+        _notify(progress, "model", position + 1, len(models))
+        _check_cancel(cancel)
     return results, warns

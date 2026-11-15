@@ -6,14 +6,29 @@ CLI 与 API 都调它，避免两边各写一遍 run_experiment + ablation + pay
 from __future__ import annotations
 
 import shlex
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 
 import pandas as pd
 
+from flowlab.errors import ExperimentCancelled
 from flowlab.eval.ablation import ablate as run_ablation
 from flowlab.eval.runner import EvalResult, run_experiment
 from flowlab.models.registry import available
 from flowlab.payload import build_payload
+
+ProgressCallback = Callable[[str, int, int], None]
+CancelCallback = Callable[[], bool]
+
+
+def _notify(progress: ProgressCallback | None, phase: str, completed: int, total: int) -> None:
+    if progress is not None:
+        progress(phase, completed, total)
+
+
+def _check_cancel(cancel: CancelCallback | None) -> None:
+    if cancel is not None and cancel():
+        raise ExperimentCancelled
 
 
 @dataclass
@@ -108,9 +123,21 @@ def validate_spec(spec: ExperimentSpec) -> None:
         raise ValueError("合成数据的正常流与攻击流数量都必须大于 0")
 
 
-def execute(df: pd.DataFrame, meta: dict, source: str, spec: ExperimentSpec) -> dict:
+def execute(
+    df: pd.DataFrame,
+    meta: dict,
+    source: str,
+    spec: ExperimentSpec,
+    *,
+    progress: ProgressCallback | None = None,
+    cancel: CancelCallback | None = None,
+) -> dict:
     """跑实验并返回统一 payload（含报告）。"""
+    _check_cancel(cancel)
+    _notify(progress, "validating", 0, 1)
     validate_spec(spec)
+    _notify(progress, "validating", 1, 1)
+    _check_cancel(cancel)
     spec.models = list(dict.fromkeys(spec.models))
     results, warns = run_experiment(
         df,
@@ -123,6 +150,8 @@ def execute(df: pd.DataFrame, meta: dict, source: str, spec: ExperimentSpec) -> 
         test_size=spec.test_size,
         validation_size=spec.validation_size,
         explain=spec.explain,
+        progress=progress,
+        cancel=cancel,
     )
     ablation = None
     if spec.ablate:
@@ -131,6 +160,7 @@ def execute(df: pd.DataFrame, meta: dict, source: str, spec: ExperimentSpec) -> 
             raise ValueError(
                 f"消融列 {spec.ablate!r} 没有参与训练，不能用于消融。可消融特征: {used[:15]}"
             )
+        _notify(progress, "ablation", 0, len(spec.models))
         ablation = run_ablation(
             df,
             spec.ablate,
@@ -142,6 +172,9 @@ def execute(df: pd.DataFrame, meta: dict, source: str, spec: ExperimentSpec) -> 
             target_fpr=spec.target_fpr,
             test_size=spec.test_size,
             validation_size=spec.validation_size,
+            base_results=results,
+            progress=progress,
+            cancel=cancel,
         ).to_dict()
     meta = dict(meta)
     effective_split = results[0].split if results else spec.split
@@ -154,7 +187,11 @@ def execute(df: pd.DataFrame, meta: dict, source: str, spec: ExperimentSpec) -> 
         }
     )
     meta["experiment"] = experiment
-    return build_payload(df, results, warns, source, meta, ablation=ablation)
+    _notify(progress, "report", 0, 1)
+    _check_cancel(cancel)
+    payload = build_payload(df, results, warns, source, meta, ablation=ablation)
+    _notify(progress, "report", 1, 1)
+    return payload
 
 
 def results_of(payload: dict) -> list[EvalResult]:

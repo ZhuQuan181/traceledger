@@ -1,3 +1,5 @@
+import time
+
 from fastapi.testclient import TestClient
 
 from flowlab.api.main import PICKLE_TOKEN, app
@@ -215,3 +217,46 @@ def test_invalid_ablation_is_a_client_error():
     )
     assert res.status_code == 400
     assert "没有参与训练" in res.json()["detail"]
+
+
+def test_background_job_reports_progress_and_persists_result(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLOWLAB_HOME", str(tmp_path))
+    created = client.post(
+        "/api/jobs/demo",
+        json={
+            "normal": 240,
+            "attack": 40,
+            "models": ["iforest"],
+            "save": True,
+        },
+        headers={"Origin": "http://127.0.0.1:8765"},
+    )
+    assert created.status_code == 202
+    job_id = created.json()["job_id"]
+    assert created.json()["status"] in {"queued", "running"}
+
+    deadline = time.monotonic() + 20
+    final = None
+    while time.monotonic() < deadline:
+        res = client.get(f"/api/jobs/{job_id}")
+        assert res.status_code == 200
+        job = res.json()
+        assert job["percent"] <= 100
+        if job["status"] in {"succeeded", "failed", "cancelled"}:
+            final = job
+            break
+        time.sleep(0.03)
+
+    assert final is not None, "后台任务未在 20 秒内完成"
+    assert final["status"] == "succeeded", final.get("error")
+    assert final["percent"] == 100
+    assert final["phase"] == "done"
+    assert final["run_id"]
+    saved = client.get(f"/api/history/{final['run_id']}")
+    assert saved.status_code == 200
+    assert saved.json()["dataset"]["rows"] == 280
+
+
+def test_background_job_unknown_id_is_404_and_finished_job_cannot_cancel():
+    assert client.get("/api/jobs/not-a-job").status_code == 404
+    assert client.delete("/api/jobs/not-a-job").status_code == 404

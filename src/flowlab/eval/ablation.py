@@ -6,11 +6,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import pandas as pd
 
+from flowlab.errors import ExperimentCancelled
 from flowlab.eval.runner import EvalResult, run_experiment
+
+ProgressCallback = Callable[[str, int, int], None]
+CancelCallback = Callable[[], bool]
 
 
 @dataclass
@@ -46,11 +51,32 @@ class Ablation:
         }
 
 
-def ablate(df: pd.DataFrame, column: str, **run_kwargs) -> Ablation:
+def ablate(
+    df: pd.DataFrame,
+    column: str,
+    *,
+    base_results: list[EvalResult] | None = None,
+    progress: ProgressCallback | None = None,
+    cancel: CancelCallback | None = None,
+    **run_kwargs,
+) -> Ablation:
     if column not in df.columns:
         raise ValueError(f"要消融的列 {column!r} 不存在，可用列: {list(df.columns)[:15]}")
-    base, _ = run_experiment(df, **run_kwargs)
-    stripped, _ = run_experiment(df.drop(columns=[column]), **run_kwargs)
+    if cancel is not None and cancel():
+        raise ExperimentCancelled
+    # service 已经跑过含该列的基线，直接复用，避免消融把每个模型训练两遍。
+    base = base_results if base_results is not None else run_experiment(df, **run_kwargs)[0]
+
+    def strip_progress(phase: str, completed: int, total: int) -> None:
+        if progress is not None and phase == "model":
+            progress("ablation", completed, total)
+
+    stripped, _ = run_experiment(
+        df.drop(columns=[column]),
+        progress=strip_progress,
+        cancel=cancel,
+        **run_kwargs,
+    )
     return Ablation(column=column, with_column=base, without_column=stripped)
 
 

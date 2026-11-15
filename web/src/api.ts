@@ -1,6 +1,7 @@
 import type {
   Comparison,
   HistoryPage,
+  Job,
   ModelInfo,
   Payload,
   RunRow,
@@ -142,4 +143,51 @@ export async function runUpload(
   if (allowPickle) headers["X-FlowLab-Pickle-Token"] = await getPickleToken();
   const res = await fetch("/api/upload", { method: "POST", body: form, headers });
   return json<Payload>(res);
+}
+
+export async function createDemoJob(p: DemoParams): Promise<Job> {
+  const res = await fetch("/api/jobs/demo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...p, explain: true, save: true }),
+  });
+  return json<Job>(res);
+}
+
+export async function createUploadJob(
+  file: File,
+  p: RunParams,
+  labels?: File | null,
+  allowPickle = false,
+): Promise<Job> {
+  const form = new FormData();
+  form.append("file", file);
+  if (labels) form.append("labels", labels);
+  form.append("split", p.split);
+  form.append("test_size", String(p.test_size));
+  form.append("validation_size", String(p.validation_size));
+  form.append("models", p.models.join(","));
+  form.append("threshold", String(p.threshold));
+  form.append("threshold_mode", p.threshold_mode);
+  form.append("target_fpr", String(p.target_fpr));
+  form.append("seed", String(p.seed));
+  if (p.ablate) form.append("ablate", p.ablate);
+  form.append("allow_pickle", String(allowPickle));
+  const headers: Record<string, string> = {};
+  if (allowPickle) headers["X-FlowLab-Pickle-Token"] = await getPickleToken();
+  const res = await fetch("/api/jobs/upload", { method: "POST", body: form, headers });
+  return json<Job>(res);
+}
+
+export async function fetchJob(id: string): Promise<Job> {
+  return json<Job>(await fetch(`/api/jobs/${encodeURIComponent(id)}`));
+}
+
+export async function fetchActiveJobs(): Promise<Job[]> {
+  return (await json<{ jobs: Job[] }>(await fetch("/api/jobs/active"))).jobs;
+}
+
+export async function cancelJob(id: string): Promise<Job> {
+  const res = await fetch(`/api/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return json<Job>(res);
 }
