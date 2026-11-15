@@ -114,3 +114,22 @@ def test_workdir_is_removed_after_terminal_state(manager):
     )
     wait_for(lambda: manager.get(created["job_id"])["status"] == "succeeded")
     assert not workdir.exists()
+
+
+def test_non_persisted_result_is_kept_for_polling(manager):
+    created = manager.submit(
+        "score",
+        model_count=1,
+        has_ablation=False,
+        save=False,
+        runner=lambda progress, cancel: {"mode": "score", "top": [{"score": 0.9}]},
+    )
+    final = wait_for(
+        lambda: (
+            manager.get(created["job_id"])
+            if manager.get(created["job_id"])["status"] == "succeeded"
+            else None
+        )
+    )
+    assert final["result_available"] is True
+    assert manager.result(created["job_id"])["top"][0]["score"] == 0.9

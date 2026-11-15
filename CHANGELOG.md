@@ -13,11 +13,18 @@
 - 实验取消采用模型边界协作式停止，取消或失败均不写入不完整历史。
 - 后台任务 API：`POST /api/jobs/demo`、`POST /api/jobs/upload`、
   `GET /api/jobs/{id}`、`GET /api/jobs/active`、`DELETE /api/jobs/{id}`。
+- Web 端无标签评分工作流：上传不含 `label` 的数据，选择 `iforest` 或
+  `autoencoder`，后台扫描后展示 Top N 可疑流与分数摘要，并可导出 CSV。
+- 新增 `POST /api/jobs/score` 与 `GET /api/jobs/{id}/result`；监督模型、
+  越界 Top N 和超限上传会在入队前拒绝。
 
 ### Changed
 
 - 消融实验直接复用已训练的基线结果，不再把每个模型的基线重复训练一次。
 - 长任务不再使用离页警告；任务由本机服务继续执行，页面关闭后可恢复。
+- 无标签评分明确与评估流程分离：不读取标签、不计算 AUC/F1，分数仅表示
+  当前批次内的相对可疑度，并提示结果不会写入历史库、归档需导出 CSV。
+- 更换数据文件或切换数据来源时立即清空旧评分，避免旧排行与新文件错配。
 
 ## [0.8.0] - 2026-11-15
 

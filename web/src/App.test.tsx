@@ -3,15 +3,17 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import App from "./App";
-import type { Job, Payload, RunRow } from "./types";
+import type { Job, Payload, RunRow, ScorePayload } from "./types";
 
 vi.mock("./api", () => ({
   cancelJob: vi.fn(),
   createDemoJob: vi.fn(),
+  createScoreJob: vi.fn(),
   createUploadJob: vi.fn(),
   fetchActiveJobs: vi.fn(),
   fetchComparison: vi.fn(),
   fetchJob: vi.fn(),
+  fetchJobResult: vi.fn(),
   fetchModels: vi.fn(),
   fetchHistory: vi.fn(),
   fetchHistoryPage: vi.fn(),
@@ -127,6 +129,7 @@ const runningJob: Job = {
   run_id: null,
   error: null,
   has_ablation: false,
+  result_available: false,
   created_at: "2026-11-15T09:00:00+08:00",
   started_at: "2026-11-15T09:00:01+08:00",
   finished_at: null,
@@ -143,11 +146,50 @@ const succeededJob: Job = {
   finished_at: "2026-11-15T09:00:08+08:00",
 };
 
+const scorePayload: ScorePayload = {
+  mode: "score",
+  generated_at: "2026-11-15T09:00:08+08:00",
+  source: "flows.csv",
+  dataset: {
+    source: "flows.csv",
+    rows: 120,
+    columns: 8,
+    hash: "deadbeef",
+    format: { format: "csv" },
+  },
+  model: { name: "iforest", kind: "unsupervised" },
+  top: [
+    {
+      score: 0.97,
+      src_ip: "10.0.0.1",
+      dst_ip: "10.0.0.2",
+      src_port: 54321,
+      dst_port: 443,
+      protocol: 6,
+      timestamp: "2026-11-15 09:00:00",
+      bytes_per_s: 1200,
+      packets_per_s: 12,
+    },
+  ],
+  summary: {
+    returned: 1,
+    scored_rows: 120,
+    max_score: 0.97,
+    median_top_score: 0.97,
+    p95_top_score: 0.97,
+  },
+  warnings: [],
+  note: "无标签模式只做可疑度排序，不计算 AUC、F1 或误报率。",
+};
+
 describe("App history restore", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
-    vi.mocked(api.fetchModels).mockResolvedValue([{ name: "mlp", kind: "supervised" }]);
+    vi.mocked(api.fetchModels).mockResolvedValue([
+      { name: "iforest", kind: "unsupervised" },
+      { name: "mlp", kind: "supervised" },
+    ]);
     vi.mocked(api.fetchHistory).mockResolvedValue([run]);
     vi.mocked(api.fetchActiveJobs).mockResolvedValue([]);
     vi.mocked(api.fetchHistoryPage).mockResolvedValue({
@@ -159,8 +201,10 @@ describe("App history restore", () => {
     });
     vi.mocked(api.loadRun).mockResolvedValue(payload);
     vi.mocked(api.createDemoJob).mockResolvedValue(runningJob);
+    vi.mocked(api.createScoreJob).mockResolvedValue({ ...runningJob, kind: "score" });
     vi.mocked(api.createUploadJob).mockResolvedValue({ ...runningJob, kind: "upload" });
     vi.mocked(api.fetchJob).mockResolvedValue(succeededJob);
+    vi.mocked(api.fetchJobResult).mockResolvedValue(scorePayload);
     vi.mocked(api.cancelJob).mockResolvedValue({ ...runningJob, status: "cancelling" });
   });
 
@@ -253,6 +297,40 @@ describe("App history restore", () => {
 
     expect(await screen.findByRole("heading", { name: "01 模型对比" })).toBeInTheDocument();
     expect(api.fetchJob).toHaveBeenCalledWith("job123456789");
+  });
+
+  it("scores an unlabeled upload without requiring evaluation labels", async () => {
+    vi.mocked(api.fetchJob).mockResolvedValue({
+      ...succeededJob,
+      kind: "score",
+      result_available: true,
+      run_id: null,
+    });
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+
+    await user.click(screen.getByRole("radio", { name: "上传文件" }));
+    const file = new File(["src_ip,dst_ip\n10.0.0.1,10.0.0.2\n"], "flows.csv", {
+      type: "text/csv",
+    });
+    fireEvent.change(container.querySelector('input[name="flow-file"]')!, {
+      target: { files: [file] },
+    });
+    await user.click(screen.getByRole("button", { name: "用 iforest 打分" }));
+
+    expect(await screen.findByRole("heading", { name: "无标签可疑度排行" })).toBeInTheDocument();
+    expect(screen.getByText(/不计算 AUC、F1 或误报率/)).toBeInTheDocument();
+    expect(screen.getByText(/排行只保留在当前服务进程/)).toBeInTheDocument();
+    expect(api.createScoreJob).toHaveBeenCalledWith(file, "iforest", 20, false);
+    expect(api.fetchJobResult).toHaveBeenCalledWith("job123456789");
+
+    const replacement = new File(["src_ip,dst_ip\n10.0.0.3,10.0.0.4\n"], "new-flows.csv", {
+      type: "text/csv",
+    });
+    fireEvent.change(container.querySelector('input[name="flow-file"]')!, {
+      target: { files: [replacement] },
+    });
+    expect(screen.queryByRole("heading", { name: "无标签可疑度排行" })).not.toBeInTheDocument();
   });
 
   it("exposes the mobile configuration panel as a modal dialog", async () => {

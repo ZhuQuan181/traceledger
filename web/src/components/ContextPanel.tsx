@@ -1,10 +1,11 @@
-import type { Payload } from "../types";
+import type { Payload, ScorePayload } from "../types";
 import { LeakList } from "./LeakList";
 
-export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, onDownloadJson,
+export function ContextPanel({ payload, score, onCopy, onDownloadMd, onDownloadHtml, onDownloadJson,
                               onDownloadCsv, onRerunWithout,
                               copied, onCloseMobile, mobileOpen }: {
   payload: Payload | null;
+  score?: ScorePayload | null;
   onCopy: () => void;
   onDownloadMd: () => void;
   onDownloadHtml: () => void;
@@ -32,7 +33,14 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
       </button>
       <section>
         <h2>数据审计 {payload && <span className={`badge ${payload.warnings.length ? "warn" : "ok"}`}>{payload.warnings.length}</span>}</h2>
-        {payload ? <LeakList warnings={payload.warnings} /> : <p className="hint">跑一次实验后显示。</p>}
+        {score ? (
+          <p className="hint">
+            无标签模式不读取标签，也不计算 AUC/F1；因此这里跳过标签泄漏与切分审计，
+            只展示本批次的可疑度排行。
+          </p>
+        ) : payload ? <LeakList warnings={payload.warnings} /> : (
+          <p className="hint">跑一次实验后显示。</p>
+        )}
         {rerunLeak && (
           <button className="wide-btn act"
                   onClick={() => onRerunWithout(
@@ -43,7 +51,7 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
         )}
       </section>
 
-      {!payload && (
+      {!payload && !score && (
         <section className="context-map">
           <h2>运行后生成</h2>
           <ol>
@@ -53,6 +61,23 @@ export function ContextPanel({ payload, onCopy, onDownloadMd, onDownloadHtml, on
             <li><span>04</span><div><strong>可离线归档的报告</strong><p>HTML 自包含，Markdown 可直接贴进实验附录。</p></div></li>
           </ol>
           <p className="hint">所有计算和报告都留在这台机器上。</p>
+        </section>
+      )}
+
+      {score && (
+        <section>
+          <h2>打分信息</h2>
+          <dl className="facts">
+            <dt>数据指纹</dt><dd className="mono">{score.dataset.hash}</dd>
+            <dt>模型</dt><dd className="mono">{score.model.name} · 无监督</dd>
+            <dt>扫描行数</dt><dd className="mono">{score.summary.scored_rows.toLocaleString()}</dd>
+            <dt>返回条数</dt><dd className="mono">{score.summary.returned}</dd>
+            <dt>最高分数</dt><dd className="mono">{score.summary.max_score?.toFixed(4) ?? "—"}</dd>
+          </dl>
+          <p className="hint">
+            分数是当前批次的相对排序，不是概率，也不应跨数据集直接套用阈值。
+            结果不会写入历史库；需要归档时请从主区域导出 CSV。
+          </p>
         </section>
       )}
 

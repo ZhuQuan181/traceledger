@@ -24,6 +24,10 @@ type Props = {
   file: File | null; onFile: (f: File | null) => void;
   labelsFile: File | null; onLabelsFile: (f: File | null) => void;
   allowPickle: boolean; onAllowPickle: (v: boolean) => void;
+  scoreModels: ModelInfo[];
+  scoreModel: string; onScoreModel: (name: string) => void;
+  scoreTop: number; onScoreTop: (value: number) => void;
+  onScore: () => void;
   busy: boolean; onRun: () => void; error: string | null; notice: string | null;
   job: Job | null;
   cancelBusy: boolean;
@@ -158,6 +162,32 @@ export function ConfigRail(p: Props) {
           ))}
         </ul>
       </section>
+
+      {p.source === "file" && (
+        <section className="score-config">
+          <h2>无标签打分</h2>
+          <p className="hint">不要求 label；只按无监督分数排序，不计算 AUC/F1。</p>
+          <label className="inline-field">
+            <span>打分模型</span>
+            <select name="score-model" value={p.scoreModel}
+                    onChange={(e) => p.onScoreModel(e.target.value)}>
+              {p.scoreModels.map((model) => (
+                <option key={model.name} value={model.name}>{model.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="inline-field">
+            <span>返回条数</span>
+            <input className="score-top" type="number" name="score-top"
+                   min={1} max={500} step={10} value={p.scoreTop}
+                   onChange={(e) => p.onScoreTop(Number(e.target.value))} />
+          </label>
+          <button className="score-run" type="button" onClick={p.onScore}
+                  disabled={p.busy || !p.file || !p.scoreModel}>
+            {p.file ? `用 ${p.scoreModel} 打分` : "先选择数据文件"}
+          </button>
+        </section>
+      )}
 
       <section>
         <h2>阈值与消融</h2>

@@ -24,7 +24,7 @@ from flowlab.compare import load_comparison
 from flowlab.jobs import JOBS, JobNotCancellable, JobQueueFull
 from flowlab.models.registry import available
 from flowlab.pipeline import load_frame
-from flowlab.service import ExperimentSpec, demo_frame, execute
+from flowlab.service import ExperimentSpec, demo_frame, execute, score_payload
 from flowlab.store import (
     count_runs,
     delete_run,
@@ -154,7 +154,7 @@ async def guard_local_api(request: Request, call_next):
                     status_code=403,
                 )
             )
-    if request.url.path in {"/api/upload", "/api/jobs/upload"}:
+    if request.url.path in {"/api/upload", "/api/jobs/upload", "/api/jobs/score"}:
         # multipart 有两份可选文件（数据 + 标签），给协议开销留 1 MB 余量。
         max_body = MAX_UPLOAD_BYTES * 2 + 1024 * 1024
         declared = _content_length(request)
@@ -199,6 +199,28 @@ async def _save_upload(file: UploadFile, path: Path, label: str) -> int:
     return total
 
 
+async def _stage_job_files(
+    file: UploadFile,
+    labels: UploadFile | None,
+    workdir: Path,
+) -> tuple[Path, Path | None, str, str | None]:
+    """把 multipart 文件复制进任务专属目录，后台线程不再依赖请求作用域。"""
+    name = file.filename or "upload"
+    label_original = labels.filename if labels is not None else None
+    safe_name = Path(name).name or "upload.csv"
+    data_path = workdir / f"data-{safe_name}"
+    if await _save_upload(file, data_path, "数据文件") == 0:
+        raise HTTPException(400, "文件为空")
+    label_path = None
+    if labels is not None:
+        _check_upload_size(labels, "标签文件")
+        label_name = Path(labels.filename or "labels.csv").name or "labels.csv"
+        candidate = workdir / f"labels-{label_name}"
+        if await _save_upload(labels, candidate, "标签文件"):
+            label_path = candidate
+    return data_path, label_path, name, label_original
+
+
 class DemoRequest(BaseModel):
     normal: int = Field(5000, ge=100, le=200_000)
     attack: int = Field(500, ge=10, le=50_000)
@@ -234,6 +256,15 @@ def _validate(models: list[str]) -> None:
     unknown = [m for m in models if m not in available()]
     if unknown:
         raise HTTPException(400, f"未知模型: {unknown}，可用: {available()}")
+
+
+def _validate_score_model(model: str) -> None:
+    from flowlab.models.registry import create
+
+    if model not in available():
+        raise HTTPException(400, f"未知模型: {model}，可用: {available()}")
+    if create(model).kind != "unsupervised":
+        raise HTTPException(400, "无标签打分只能使用无监督模型（iforest / autoencoder）")
 
 
 @app.get("/api/health")
@@ -348,6 +379,19 @@ def job_cancel(job_id: str):
         raise HTTPException(404, "没有这个后台任务") from exc
     except JobNotCancellable as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+@app.get("/api/jobs/{job_id}/result")
+def job_result(job_id: str):
+    job = JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(404, "没有这个后台任务")
+    if job["status"] != "succeeded":
+        raise HTTPException(409, "任务尚未成功完成")
+    result = JOBS.result(job_id)
+    if result is None:
+        raise HTTPException(404, "结果已写入历史库，请通过 run_id 读取")
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/upload")
@@ -499,19 +543,7 @@ async def upload_job(
 
     workdir = JOBS.make_workdir()
     try:
-        name = file.filename or "upload"
-        label_original = labels.filename if labels is not None else None
-        safe_name = Path(name).name or "upload.csv"
-        data_path = workdir / f"data-{safe_name}"
-        if await _save_upload(file, data_path, "数据文件") == 0:
-            raise HTTPException(400, "文件为空")
-        label_path = None
-        if labels is not None:
-            _check_upload_size(labels, "标签文件")
-            label_name = Path(labels.filename or "labels.csv").name or "labels.csv"
-            candidate = workdir / f"labels-{label_name}"
-            if await _save_upload(labels, candidate, "标签文件"):
-                label_path = candidate
+        data_path, label_path, name, label_original = await _stage_job_files(file, labels, workdir)
 
         def runner(progress, cancel):
             from flowlab.ingest.pcap import PcapUnavailable
@@ -529,7 +561,7 @@ async def upload_job(
                 raise ValueError(f"读取失败：{exc}") from exc
             progress("loading", 1, 1)
             meta = loaded.meta()
-            if labels is not None and meta.get("labels", {}).get("file"):
+            if label_original and meta.get("labels", {}).get("file"):
                 meta["labels"]["file"] = label_original
             spec = ExperimentSpec(
                 models=mlist,
@@ -572,6 +604,77 @@ async def upload_job(
                 model_count=len(mlist),
                 has_ablation=bool(ablate),
                 save=True,
+                runner=runner,
+                workdir=workdir,
+            )
+        except JobQueueFull as exc:
+            raise HTTPException(429, str(exc)) from exc
+    except Exception:
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise
+
+
+@app.post("/api/jobs/score", status_code=202)
+async def score_job(
+    file: UploadFile = File(...),
+    model: str = Form("iforest"),
+    top: int = Form(50),
+    allow_pickle: bool = Form(False),
+    pickle_token: str | None = Header(None, alias="X-FlowLab-Pickle-Token"),
+):
+    _validate_score_model(model)
+    if not 1 <= top <= 500:
+        raise HTTPException(400, "top 应在 1~500 之间")
+    if allow_pickle:
+        _check_pickle_token(pickle_token)
+    _check_upload_size(file, "数据文件")
+    if not JOBS.can_accept():
+        raise HTTPException(429, "本机已有一个实验在运行、另一个在排队；请等待或先取消排队任务。")
+
+    workdir = JOBS.make_workdir()
+    try:
+        data_path, _, name, _ = await _stage_job_files(file, None, workdir)
+
+        def runner(progress, cancel):
+            from flowlab.ingest.pcap import PcapUnavailable
+
+            progress("loading", 0, 1)
+            try:
+                loaded = load_frame(data_path, None, allow_pickle=allow_pickle)
+            except PcapUnavailable as exc:
+                raise ValueError(str(exc)) from exc
+            except Exception as exc:  # noqa: BLE001 - 后台任务边界统一转成用户提示
+                raise ValueError(f"读取失败：{exc}") from exc
+            progress("loading", 1, 1)
+            payload = score_payload(
+                loaded.df,
+                loaded.meta(),
+                name,
+                model=model,
+                top=top,
+                progress=progress,
+                cancel=cancel,
+            )
+            if allow_pickle:
+                payload["warnings"] = [
+                    {
+                        "rule": "pickle_unsafe",
+                        "severity": "medium",
+                        "message": (
+                            "该文件以 pickle 加载，反序列化会执行代码；请只加载自己生成的文件。"
+                        ),
+                    }
+                ]
+            else:
+                payload["warnings"] = []
+            return payload
+
+        try:
+            return JOBS.submit(
+                "score",
+                model_count=1,
+                has_ablation=False,
+                save=False,
                 runner=runner,
                 workdir=workdir,
             )

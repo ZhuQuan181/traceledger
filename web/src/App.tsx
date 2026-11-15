@@ -2,16 +2,25 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   cancelJob,
   createDemoJob,
+  createScoreJob,
   createUploadJob,
   fetchActiveJobs,
   fetchComparison,
   fetchHistory,
   fetchJob,
+  fetchJobResult,
   fetchModels,
   loadRun,
 } from "./api";
 import { num, pct } from "./format";
-import type { Comparison, Job, ModelInfo, Payload, RunRow } from "./types";
+import type {
+  Comparison,
+  Job,
+  ModelInfo,
+  Payload,
+  RunRow,
+  ScorePayload,
+} from "./types";
 import { TopBar } from "./components/TopBar";
 import { ConfigRail } from "./components/ConfigRail";
 import { ContextPanel } from "./components/ContextPanel";
@@ -28,6 +37,7 @@ import { ComparePanel } from "./components/ComparePanel";
 import { DiagnosticCurves } from "./components/DiagnosticCurves";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { RunProgress } from "./components/RunProgress";
+import { ScorePanel } from "./components/ScorePanel";
 
 const ALL = ["mlp", "iforest", "autoencoder"];
 const JOB_STORAGE_KEY = "flowlab.active-job";
@@ -104,6 +114,9 @@ export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [labelsFile, setLabelsFile] = useState<File | null>(null);
   const [allowPickle, setAllowPickle] = useState(false);
+  const [scoreModel, setScoreModel] = useState("iforest");
+  const [scoreTop, setScoreTop] = useState(20);
+  const [scoreResult, setScoreResult] = useState<ScorePayload | null>(null);
   const [payload, setPayload] = useState<Payload | null>(null);
   const [history, setHistory] = useState<RunRow[]>([]);
   const [job, setJob] = useState<Job | null>(null);
@@ -125,13 +138,23 @@ export default function App() {
   const requestInFlight = useRef(false);
   const jobActive = Boolean(job && ["queued", "running", "cancelling"].includes(job.status));
   const busy = jobActive || historyBusy || startingJob;
+  const scoreModels = useMemo(
+    () => models.filter((model) => model.kind === "unsupervised"),
+    [models],
+  );
 
   useEffect(() => {
     fetchModels().then((items) => {
       setModels(items);
+      setScoreModel((current) => (
+        items.some((item) => item.name === current && item.kind === "unsupervised")
+          ? current
+          : items.find((item) => item.kind === "unsupervised")?.name ?? "iforest"
+      ));
       setConnectionError(null);
     }).catch(() => {
       setModels(ALL.map((n) => ({ name: n, kind: n === "mlp" ? "supervised" : "unsupervised" })));
+      setScoreModel("iforest");
       setConnectionError("无法连接本地 FlowLab 后端；当前配置只是占位，运行实验仍会失败。");
     });
     refreshHistory();
@@ -441,10 +464,34 @@ export default function App() {
         }
 
         clearStoredJob();
-        if (next.status === "succeeded" && next.run_id) {
+        if (next.status === "succeeded" && next.kind === "score") {
+          try {
+            const result = await fetchJobResult(next.job_id);
+            if (disposed) return;
+            setScoreResult(result);
+            setPayload(null);
+            setConnectionError(null);
+            window.requestAnimationFrame(() => {
+              const heading = document.getElementById("score-result-title");
+              if (typeof heading?.scrollIntoView === "function") {
+                heading.scrollIntoView({
+                  behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                    ? "auto"
+                    : "smooth",
+                  block: "start",
+                });
+              }
+            });
+            setJob(null);
+          } catch (error) {
+            if (disposed) return;
+            setError(error instanceof Error ? error.message : String(error));
+          }
+        } else if (next.status === "succeeded" && next.run_id) {
           try {
             const data = await loadRun(next.run_id);
             if (disposed) return;
+            setScoreResult(null);
             applyPayload(data, data.experiment?.ablate ?? undefined);
             setConnectionError(null);
             refreshHistory();
@@ -513,6 +560,7 @@ export default function App() {
     setError(null);
     setJob(null);
     setJobId(null);
+    setScoreResult(null);
     window.localStorage.removeItem(JOB_STORAGE_KEY);
     setMobilePanel(null);
     try {
@@ -537,11 +585,47 @@ export default function App() {
     }
   }
 
+  async function runScore() {
+    if (requestInFlight.current || jobActive) return;
+    if (!file) {
+      setError("请先选择数据文件。");
+      return;
+    }
+    if (!scoreModel) {
+      setError("请选择一个无监督打分模型。");
+      return;
+    }
+    if (!Number.isInteger(scoreTop) || scoreTop < 1 || scoreTop > 500) {
+      setError("返回条数需为 1–500 的整数。");
+      return;
+    }
+    requestInFlight.current = true;
+    setStartingJob(true);
+    setError(null);
+    setJob(null);
+    setJobId(null);
+    setScoreResult(null);
+    window.localStorage.removeItem(JOB_STORAGE_KEY);
+    setMobilePanel(null);
+    try {
+      const created = await createScoreJob(file, scoreModel, scoreTop, allowPickle);
+      setJob(created);
+      setJobId(created.job_id);
+      window.localStorage.setItem(JOB_STORAGE_KEY, created.job_id);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      requestInFlight.current = false;
+      setStartingJob(false);
+    }
+  }
+
   async function openRun(id: string) {
     if (requestInFlight.current || jobActive) return;
     requestInFlight.current = true;
     setHistoryBusy(true);
     setError(null);
+    setScoreResult(null);
     setMobilePanel(null);
     try {
       applyPayload(await loadRun(id), undefined, true);
@@ -584,6 +668,7 @@ export default function App() {
   function selectFile(next: File | null) {
     setFile(next);
     setLabelsFile(null);
+    setScoreResult(null);
     setAblate("");
     setAblationColumns([]);
     setHistoryNotice(null);
@@ -667,6 +752,7 @@ export default function App() {
           onSource={(s) => {
             setSource(s);
             setError(null);
+            setScoreResult(null);
             setFile(null);
             setLabelsFile(null);
             setAllowPickle(false);
@@ -686,6 +772,9 @@ export default function App() {
           file={file} onFile={selectFile}
           labelsFile={labelsFile} onLabelsFile={setLabelsFile}
           allowPickle={allowPickle} onAllowPickle={setAllowPickle}
+          scoreModels={scoreModels}
+          scoreModel={scoreModel} onScoreModel={setScoreModel}
+          scoreTop={scoreTop} onScoreTop={setScoreTop} onScore={runScore}
           busy={busy} onRun={() => run()} error={error} notice={historyNotice} stale={stale}
           job={job} cancelBusy={cancelBusy}
           onCancelJob={cancelCurrentJob} onDismissJob={dismissJob}
@@ -710,6 +799,7 @@ export default function App() {
               </p>
             </aside>
           )}
+          {!job && scoreResult && <ScorePanel result={scoreResult} />}
           {connectionError && (
             <div className="connection-warning" role="status">
               {connectionError} 请在本机运行 <code>uv run flowlab serve</code>。
@@ -724,7 +814,7 @@ export default function App() {
             </div>
           )}
 
-          {!payload && !busy && (
+          {!payload && !busy && !scoreResult && (
             <section className="intro">
               <div className="intro-copy">
                 <p className="intro-kicker"><span className="live" aria-hidden="true" />本地流量实验室</p>
@@ -738,6 +828,12 @@ export default function App() {
                           disabled={busy || !canRun}>
                     {source === "file" && !file ? "先选择数据文件" : "用当前配置跑一次"}
                   </button>
+                  {source === "file" && file && (
+                    <button className="secondary-action" type="button"
+                            onClick={runScore} disabled={busy}>
+                      只打分（无需标签）
+                    </button>
+                  )}
                   {history.length > 0 && <span className="hint">或从顶部打开一次历史实验</span>}
                 </div>
                 {!canRun && (
@@ -892,6 +988,7 @@ export default function App() {
 
         <ContextPanel
           payload={payload}
+          score={scoreResult}
           onCopy={copy}
           onDownloadMd={() => payload && save(payload.report_md, "text/markdown", "md")}
           onDownloadHtml={() => payload && save(payload.report_html, "text/html", "html")}

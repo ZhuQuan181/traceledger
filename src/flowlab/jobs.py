@@ -79,6 +79,7 @@ class Job:
     message: str = "等待本机执行位"
     error: str | None = None
     run_id: str | None = None
+    result: dict | None = field(default=None, repr=False)
     created_at: str = field(default_factory=now_iso)
     started_at: str | None = None
     finished_at: str | None = None
@@ -112,6 +113,7 @@ class Job:
             "run_id": self.run_id,
             "error": self.error,
             "has_ablation": self.has_ablation,
+            "result_available": self.result is not None,
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
@@ -212,6 +214,11 @@ class JobManager:
             job = self._jobs.get(job_id)
             return None if job is None else job.snapshot()
 
+    def result(self, job_id: str) -> dict | None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            return None if job is None else job.result
+
     def active(self) -> list[dict]:
         with self._lock:
             self._prune_locked()
@@ -280,12 +287,20 @@ class JobManager:
             with self._lock:
                 current = self._jobs.get(job_id)
                 if current is not None:
+                    if not current.save:
+                        current.result = payload
                     current.percent = 100
                     current.run_id = run_id
                     self._finish_locked(
                         current,
                         "succeeded",
-                        message="实验完成，结果已保存" if run_id else "实验完成",
+                        message=(
+                            "实验完成，结果已保存"
+                            if run_id
+                            else "打分完成"
+                            if current.kind == "score"
+                            else "实验完成"
+                        ),
                     )
         except ExperimentCancelled:
             with self._lock:

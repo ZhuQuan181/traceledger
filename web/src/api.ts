@@ -6,6 +6,7 @@ import type {
   Payload,
   RunRow,
   RunStatus,
+  ScorePayload,
 } from "./types";
 
 let pickleTokenPromise: Promise<string> | null = null;
@@ -179,6 +180,23 @@ export async function createUploadJob(
   return json<Job>(res);
 }
 
+export async function createScoreJob(
+  file: File,
+  model: string,
+  top: number,
+  allowPickle = false,
+): Promise<Job> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("model", model);
+  form.append("top", String(top));
+  form.append("allow_pickle", String(allowPickle));
+  const headers: Record<string, string> = {};
+  if (allowPickle) headers["X-FlowLab-Pickle-Token"] = await getPickleToken();
+  const res = await fetch("/api/jobs/score", { method: "POST", body: form, headers });
+  return json<Job>(res);
+}
+
 export async function fetchJob(id: string): Promise<Job> {
   return json<Job>(await fetch(`/api/jobs/${encodeURIComponent(id)}`));
 }
@@ -190,4 +208,8 @@ export async function fetchActiveJobs(): Promise<Job[]> {
 export async function cancelJob(id: string): Promise<Job> {
   const res = await fetch(`/api/jobs/${encodeURIComponent(id)}`, { method: "DELETE" });
   return json<Job>(res);
+}
+
+export async function fetchJobResult(id: string): Promise<ScorePayload> {
+  return json<ScorePayload>(await fetch(`/api/jobs/${encodeURIComponent(id)}/result`));
 }

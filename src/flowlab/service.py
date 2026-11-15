@@ -8,6 +8,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -221,32 +222,138 @@ def demo_frame(normal: int = 5000, attack: int = 500, seed: int = 42, leaky: boo
     return df, meta, source
 
 
-def score_frame(df: pd.DataFrame, model: str = "iforest", top: int = 20) -> list[dict]:
+def _score_value(value):
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if hasattr(value, "isoformat"):
+        return value.isoformat(sep=" ") if isinstance(value, pd.Timestamp) else value.isoformat()
+    if hasattr(value, "item"):
+        return value.item()
+    return value
+
+
+def score_frame(
+    df: pd.DataFrame,
+    model: str = "iforest",
+    top: int = 20,
+    *,
+    progress: ProgressCallback | None = None,
+    cancel: CancelCallback | None = None,
+) -> list[dict]:
     """无标签数据打分：返回最可疑的 N 条流（含分数）。"""
     from flowlab.features.prepare import build_feature_matrix
-    from flowlab.models.registry import create
+    from flowlab.models.registry import available, create
 
-    X, feats = build_feature_matrix(df)
-    det = create(model)
-    det.fit(X, None)
+    _check_cancel(cancel)
+    if model not in available():
+        raise ValueError(f"未知模型 {model!r}，可用模型: {available()}")
+    detector = create(model)
+    if detector.kind != "unsupervised":
+        raise ValueError("无标签打分只能使用无监督模型（iforest / autoencoder）")
+    if not 1 <= top <= 500:
+        raise ValueError("top 应在 1~500 之间")
+
+    _notify(progress, "features", 0, 1)
+    X, _ = build_feature_matrix(df)
+    _notify(progress, "features", 1, 1)
+    _check_cancel(cancel)
+    _notify(progress, "model", 0, 1)
+    detector.fit(X, None)
+    _check_cancel(cancel)
+    scores = detector.score(X)
+    _notify(progress, "model", 1, 1)
+    _check_cancel(cancel)
     view = df.copy()
-    view["score"] = det.score(X)
+    view["score"] = scores
     cols = [
         c
         for c in (
             "src_ip",
             "dst_ip",
+            "src_port",
             "dst_port",
             "protocol",
             "timestamp",
+            "duration_ms",
+            "fwd_packets",
+            "bwd_packets",
+            "fwd_bytes",
+            "bwd_bytes",
             "bytes_per_s",
             "packets_per_s",
         )
         if c in view.columns
     ]
-    return (
+    rows = (
         view.sort_values("score", ascending=False)
+        .assign(
+            **{column: view[column].map(_score_value) for column in cols if column != "timestamp"}
+        )
         .head(top)[cols + ["score"]]
-        .round(4)
         .to_dict("records")
     )
+    return [
+        {
+            **{key: _score_value(value) for key, value in row.items()},
+            "score": round(float(row["score"]), 4),
+        }
+        for row in rows
+    ]
+
+
+def score_payload(
+    df: pd.DataFrame,
+    meta: dict,
+    source: str,
+    *,
+    model: str = "iforest",
+    top: int = 50,
+    progress: ProgressCallback | None = None,
+    cancel: CancelCallback | None = None,
+) -> dict:
+    """无标签排序的 API payload：不生成评估指标，也不伪装成一次监督实验。"""
+    _check_cancel(cancel)
+    rows = score_frame(
+        df,
+        model=model,
+        top=top,
+        progress=progress,
+        cancel=cancel,
+    )
+    scores = [float(row["score"]) for row in rows]
+    _notify(progress, "report", 0, 1)
+    _check_cancel(cancel)
+    from flowlab.eval.runner import dataset_hash
+
+    payload = {
+        "mode": "score",
+        "generated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+        "source": source,
+        "dataset": {
+            "source": source,
+            "rows": int(len(df)),
+            "columns": int(len(df.columns)),
+            "hash": dataset_hash(df),
+            "format": meta.get("format", {}),
+            "labels": meta.get("labels"),
+        },
+        "model": {"name": model, "kind": "unsupervised"},
+        "top": rows,
+        "summary": {
+            "returned": len(rows),
+            "scored_rows": int(len(df)),
+            "max_score": max(scores) if scores else None,
+            "median_top_score": (round(float(pd.Series(scores).median()), 4) if scores else None),
+            "p95_top_score": (
+                round(float(pd.Series(scores).quantile(0.95)), 4) if scores else None
+            ),
+        },
+        "note": "无标签模式只做可疑度排序，不计算 AUC、F1 或误报率。",
+    }
+    _notify(progress, "report", 1, 1)
+    return payload

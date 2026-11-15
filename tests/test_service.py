@@ -4,7 +4,7 @@ from flowlab.engineer import add_engineered_features
 from flowlab.eval.ablation import ablate
 from flowlab.eval.runner import EvalResult
 from flowlab.schema import normalize_columns
-from flowlab.service import ExperimentSpec, demo_frame, execute
+from flowlab.service import ExperimentSpec, demo_frame, execute, score_payload
 from flowlab.synthetic import generate
 
 
@@ -86,3 +86,27 @@ def test_ablation_reuses_the_baseline_instead_of_training_it_twice(monkeypatch):
     assert len(calls) == 1
     assert "dst_port" not in calls[0].columns
     assert result.with_column is baseline
+
+
+def test_unlabeled_scoring_ranks_flows_without_inventing_metrics():
+    df = add_engineered_features(normalize_columns(generate(500, 60, seed=4))).drop(
+        columns=["label"]
+    )
+    payload = score_payload(df, {"format": {"format": "synthetic"}}, "unlabeled", top=12)
+    assert payload["mode"] == "score"
+    assert payload["dataset"]["rows"] == 560
+    assert payload["summary"]["returned"] == 12
+    assert len(payload["top"]) == 12
+    assert [row["score"] for row in payload["top"]] == sorted(
+        (row["score"] for row in payload["top"]), reverse=True
+    )
+    assert "results" not in payload
+    assert "AUC" in payload["note"]
+
+
+def test_unlabeled_scoring_rejects_supervised_models():
+    df = add_engineered_features(normalize_columns(generate(200, 30, seed=4))).drop(
+        columns=["label"]
+    )
+    with pytest.raises(ValueError, match="只能使用无监督模型"):
+        score_payload(df, {}, "unlabeled", model="mlp")

@@ -260,3 +260,48 @@ def test_background_job_reports_progress_and_persists_result(monkeypatch, tmp_pa
 def test_background_job_unknown_id_is_404_and_finished_job_cannot_cancel():
     assert client.get("/api/jobs/not-a-job").status_code == 404
     assert client.delete("/api/jobs/not-a-job").status_code == 404
+
+
+def test_unlabeled_score_job_returns_ranked_flows():
+    from flowlab.schema import normalize_columns
+    from flowlab.synthetic import generate
+
+    frame = normalize_columns(generate(300, 40, seed=9)).drop(columns=["label"])
+    created = client.post(
+        "/api/jobs/score",
+        files={"file": ("flows.csv", frame.to_csv(index=False).encode(), "text/csv")},
+        data={"model": "iforest", "top": "10"},
+        headers={"Origin": "http://127.0.0.1:8765"},
+    )
+    assert created.status_code == 202
+    job_id = created.json()["job_id"]
+
+    deadline = time.monotonic() + 20
+    final = None
+    while time.monotonic() < deadline:
+        job = client.get(f"/api/jobs/{job_id}").json()
+        if job["status"] in {"succeeded", "failed", "cancelled"}:
+            final = job
+            break
+        time.sleep(0.03)
+    assert final is not None and final["status"] == "succeeded", final
+    assert final["result_available"] is True
+
+    result = client.get(f"/api/jobs/{job_id}/result")
+    assert result.status_code == 200
+    payload = result.json()
+    assert payload["mode"] == "score"
+    assert payload["dataset"]["rows"] == 340
+    assert len(payload["top"]) == 10
+    scores = [row["score"] for row in payload["top"]]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_score_job_rejects_a_supervised_model():
+    res = client.post(
+        "/api/jobs/score",
+        files={"file": ("flows.csv", b"a,b\n1,2\n", "text/csv")},
+        data={"model": "mlp"},
+    )
+    assert res.status_code == 400
+    assert "无监督模型" in res.json()["detail"]

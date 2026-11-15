@@ -313,7 +313,7 @@ export type JobStatus = "queued" | "running" | "cancelling" | "succeeded" | "fai
 
 export type Job = {
   job_id: string;
-  kind: "demo" | "upload" | "test";
+  kind: "demo" | "upload" | "score" | "test";
   status: JobStatus;
   phase: "queued" | "loading" | "validating" | "features" | "model" | "ablation" | "report" | "done";
   completed_models: number;
@@ -324,7 +324,50 @@ export type Job = {
   run_id: string | null;
   error: string | null;
   has_ablation: boolean;
+  result_available: boolean;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+};
+
+export type ScoreRow = {
+  score: number;
+  src_ip?: string | null;
+  dst_ip?: string | null;
+  src_port?: number | null;
+  dst_port?: number | null;
+  protocol?: number | string | null;
+  timestamp?: string | null;
+  duration_ms?: number | null;
+  fwd_packets?: number | null;
+  bwd_packets?: number | null;
+  fwd_bytes?: number | null;
+  bwd_bytes?: number | null;
+  bytes_per_s?: number | null;
+  packets_per_s?: number | null;
+};
+
+export type ScorePayload = {
+  mode: "score";
+  generated_at: string;
+  source: string;
+  dataset: {
+    source: string;
+    rows: number;
+    columns: number;
+    hash: string;
+    format?: Record<string, unknown>;
+    labels?: Record<string, unknown> | null;
+  };
+  model: { name: string; kind: "unsupervised" };
+  top: ScoreRow[];
+  summary: {
+    returned: number;
+    scored_rows: number;
+    max_score: number | null;
+    median_top_score: number | null;
+    p95_top_score: number | null;
+  };
+  warnings?: { rule: string; severity: string; message: string }[];
+  note: string;
 };
