@@ -13,8 +13,9 @@
 > **Turn network traffic anomaly detection research models into systems that run, reproduce, and explain.**
 
 - Created: 2026-11-11
-- Current version: **v0.8.0** (2026-11-15: cross-experiment comparison, label-quality diagnostics, searchable history and retention controls, ROC/PR/calibration curves, environment manifests)
-- Tests: **168 backend tests + 26 frontend tests**; pcap tests require `tshark`
+- Current version: **v0.9.0** (2026-11-15: local background jobs and refresh recovery, unlabeled scoring, upload preflight, compressed history and faster queries, browser E2E)
+- Tests: **192 backend tests + 31 frontend component tests + 4 Chromium E2E tests**; pcap tests require `tshark`
+- Accessibility: core pages pass automated axe checks for serious/critical WCAG A/AA violations; this is not a full WCAG certification
 - Documentation: Chinese and English READMEs, with design docs in Chinese; code and interfaces are in English
 - Project site: https://zhuquan181.github.io/traceledger/en/
 - Sample report (synthetic data): https://zhuquan181.github.io/traceledger/demo-report.html
@@ -89,19 +90,19 @@ Shared flags: `--models mlp,iforest`, `--split temporal|random|group`, `--test-s
 
 - **Quality**: Ruff checks and format validation; the full backend suite on Python 3.11 and 3.13
 - **Frontend**: component tests, a full dependency audit, and a production build
+- **Browser**: a separate Chromium E2E job covers landing-page accessibility, upload preflight, the mobile configuration drawer, and a complete experiment
 - **Packaging**: verifies both a source checkout without frontend assets and a release wheel with the embedded Web UI
 - **Container**: builds the Docker image on every CI run
 - **Pages**: deploys the Chinese and English project sites plus a static sample report generated from synthetic data
 - **Local workbench**: GitHub Pages hosts the introduction only; the full Web UI needs the local Python backend (`flowlab serve`)
 
-## Highlights in v0.8
+## Highlights in v0.9
 
-- **Cross-experiment comparison**: select 2–4 runs and validate the dataset fingerprint, feature matrix, split, validation size, and threshold policy before comparing validation/test metrics and deltas; export the table as Markdown.
-- **History workflow**: search by source, model, status, or note; browse pages; annotate runs as baseline/failed/archived; delete one run or prune older history by retention count.
-- **Data quality**: report label coverage, duplicate rows, multi-label entity conflicts, and tiny classes separately from model performance.
-- **Diagnostics**: target-FPR threshold selection, ROC/PR curves, calibration curves, Brier score, and a model-parameter table.
-- **Reproducible environment**: reports record FlowLab, Python, pandas, NumPy, and scikit-learn versions; the environment is part of the experiment fingerprint.
-- **Interface and security**: narrow-screen history/comparison dialogs, a collapsed checklist by default, and a host allowlist plus security headers for the local API.
+- **Operable long-running jobs**: a local single-execution background queue exposes stage progress, queuing, cooperative cancellation, and refresh recovery; cancelled or failed jobs never write partial history.
+- **Unlabeled data is still useful**: upload data without a `label` column, scan it with an unsupervised model, and export the top-N suspicious flows. The UI separates scoring from supervised evaluation and does not report AUC/F1.
+- **Preflight before training**: inspect column mapping, missing/infinite values, timestamps, label coverage, and class counts after the three-way split. Blocking issues are separated from advisories.
+- **Scale and performance**: history payloads use zlib compression, SQLite uses WAL and indexes, history pages use aggregate queries, and larger JSON responses use GZip.
+- **Automated gates**: Playwright and axe browser tests now run alongside Python and frontend jobs in CI.
 
 See the [optimization roadmap](docs/OPTIMIZATION-ROADMAP.md) for the next priorities and acceptance criteria.
 

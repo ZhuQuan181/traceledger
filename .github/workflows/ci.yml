@@ -85,6 +85,40 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
+  e2e:
+    name: E2E · Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: latest
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Sync API and data dependencies
+        run: uv sync --locked --extra api --extra data
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        working-directory: web
+        run: npm run test:e2e
+
   source-package:
     name: Package · source checkout
     runs-on: ubuntu-latest

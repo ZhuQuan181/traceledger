@@ -20,8 +20,11 @@ cd web && npm ci
 uv run pytest tests/
 uv run ruff check .
 uv run ruff format --check .
-cd web && npm test && npm run build && npm audit --audit-level=high
+cd web && npm test && npm run build && npm run test:e2e && npm audit --audit-level=high
 ```
+
+首次运行浏览器测试前，先执行 `cd web && npx playwright install chromium`。
+E2E 使用临时 `FLOWLAB_HOME` 和合成数据，不会读取或改写本机实验历史。
 
 涉及打包时再运行：
 

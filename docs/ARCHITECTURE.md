@@ -214,6 +214,9 @@ false_negatives / source_ranking`。
    阻断项与注意事项分开呈现。
 7. ✅ 历史 payload zlib 压缩、SQLite WAL/索引、单次历史页查询和 GZip 响应。
 8. ✅ CSV 读入与评分路径去除不必要的整表复制，并补充读入内存基准。
+9. ✅ Playwright + axe 覆盖首屏、上传预检、390px 配置抽屉和一次小型合成实验；
+   CI 使用独立 Chromium 任务。自动检查只覆盖关键页面的 serious/critical 规则，
+   不等同完整 WCAG 认证。
 
 ## 十二、剩余债务
 
@@ -222,5 +225,7 @@ false_negatives / source_ranking`。
 3. **前端结构**：`styles.css` 仍是单文件，组件继续增加后应拆分为 tokens/layout/components。
 4. **远程模式**：没有内置鉴权；`--allow-remote` 只表示用户确认风险，不提供访问控制。
 5. **基准复现**：公开数据集与 pcap 端到端仍未进入固定 CI；`tshark` 路径目前以跳过为主。
+6. **浏览器覆盖**：E2E 目前只跑 Chromium；可访问性检查未覆盖屏幕阅读器和全部键盘路径，
+   Firefox/WebKit 仍需后续补测。
 
 下一步的优先级和验收标准见 [`OPTIMIZATION-ROADMAP.md`](OPTIMIZATION-ROADMAP.md)。
