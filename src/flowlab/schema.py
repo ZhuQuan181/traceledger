@@ -60,6 +60,23 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return out.loc[:, ~out.columns.duplicated()]
 
 
+def column_mapping(columns) -> list[dict]:
+    """解释每个原始列名如何映射到内部 schema，供预检和排障展示。"""
+    out = []
+    for original in columns:
+        normalized = normalize_name(original)
+        canonical = CANON.get(normalized, normalized)
+        out.append(
+            {
+                "original": str(original),
+                "normalized": normalized,
+                "canonical": canonical,
+                "mapped": canonical != normalized,
+            }
+        )
+    return out
+
+
 BENIGN_ALIASES = {"benign", "normal", "0", "0.0", "false", "no", "n", "good", "clean", "negative"}
 ATTACK_ALIASES = {"attack", "anomaly", "malicious", "1", "1.0", "true", "yes", "bad", "positive"}
 

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import App from "./App";
-import type { Job, Payload, RunRow, ScorePayload } from "./types";
+import type { Job, Payload, PreflightResult, RunRow, ScorePayload } from "./types";
 
 vi.mock("./api", () => ({
   cancelJob: vi.fn(),
@@ -20,6 +20,7 @@ vi.mock("./api", () => ({
   deleteRun: vi.fn(),
   pruneHistory: vi.fn(),
   loadRun: vi.fn(),
+  preflightUpload: vi.fn(),
   updateRunMeta: vi.fn(),
 }));
 
@@ -182,6 +183,58 @@ const scorePayload: ScorePayload = {
   note: "无标签模式只做可疑度排序，不计算 AUC、F1 或误报率。",
 };
 
+const preflightResult: PreflightResult = {
+  source: "flows.csv",
+  dataset: { rows: 120, columns: 10, features: 8, hash: "deadbeef" },
+  column_mapping: [
+    {
+      original: "Source IP",
+      normalized: "source_ip",
+      canonical: "src_ip",
+      mapped: true,
+      role: "源 IP",
+    },
+  ],
+  checks: [
+    {
+      key: "labels",
+      label: "标签",
+      status: "pass",
+      scope: "evaluation",
+      detail: "BENIGN 90 行，攻击 30 行。",
+      hint: null,
+    },
+  ],
+  missing: { cells: 0, columns: [] },
+  non_finite: { cells: 0, columns: {} },
+  timestamp: { column: "timestamp", parse_rate: 1, invalid: 0 },
+  labels: {
+    present: true,
+    missing: 0,
+    benign: 90,
+    attack: 30,
+    classes: [
+      { label: "BENIGN", count: 90, kind: "benign" },
+      { label: "DDoS", count: 30, kind: "attack" },
+    ],
+  },
+  split: {
+    requested: "temporal",
+    effective: "temporal",
+    fell_back: false,
+    coverage: [
+      { split: "train", rows: 60, benign: 45, attack: 15 },
+      { split: "validation", rows: 24, benign: 18, attack: 6 },
+      { split: "test", rows: 36, benign: 27, attack: 9 },
+    ],
+    entity_key: "5-tuple",
+    warnings: [],
+  },
+  ready_for_evaluation: true,
+  ready_for_scoring: true,
+  blockers: { evaluation: [], scoring: [] },
+};
+
 describe("App history restore", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -203,6 +256,7 @@ describe("App history restore", () => {
     vi.mocked(api.createDemoJob).mockResolvedValue(runningJob);
     vi.mocked(api.createScoreJob).mockResolvedValue({ ...runningJob, kind: "score" });
     vi.mocked(api.createUploadJob).mockResolvedValue({ ...runningJob, kind: "upload" });
+    vi.mocked(api.preflightUpload).mockResolvedValue(preflightResult);
     vi.mocked(api.fetchJob).mockResolvedValue(succeededJob);
     vi.mocked(api.fetchJobResult).mockResolvedValue(scorePayload);
     vi.mocked(api.cancelJob).mockResolvedValue({ ...runningJob, status: "cancelling" });
@@ -331,6 +385,38 @@ describe("App history restore", () => {
       target: { files: [replacement] },
     });
     expect(screen.queryByRole("heading", { name: "无标签可疑度排行" })).not.toBeInTheDocument();
+  });
+
+  it("preflights an upload before starting the long-running evaluation", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    await user.click(screen.getByRole("radio", { name: "上传文件" }));
+    const file = new File(["src_ip,dst_ip\n10.0.0.1,10.0.0.2\n"], "flows.csv", {
+      type: "text/csv",
+    });
+    fireEvent.change(container.querySelector('input[name="flow-file"]')!, {
+      target: { files: [file] },
+    });
+    await user.click(screen.getByRole("button", { name: "预检数据与切分" }));
+
+    expect(await screen.findByRole("heading", { name: "先核对，再训练。" }))
+      .toBeInTheDocument();
+    expect(screen.getByText(/数据与切分通过预检/)).toBeInTheDocument();
+    expect(screen.getByText(/Source IP/)).toBeInTheDocument();
+    expect(api.preflightUpload).toHaveBeenCalledWith(
+      file,
+      { split: "temporal", test_size: 0.3, validation_size: 0.2, seed: 42 },
+      null,
+      false,
+    );
+
+    await user.click(screen.getByRole("button", { name: "开始完整评估" }));
+    expect(api.createUploadJob).toHaveBeenCalledWith(
+      file,
+      expect.objectContaining({ split: "temporal", seed: 42 }),
+      null,
+      false,
+    );
   });
 
   it("exposes the mobile configuration panel as a modal dialog", async () => {

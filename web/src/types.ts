@@ -371,3 +371,75 @@ export type ScorePayload = {
   warnings?: { rule: string; severity: string; message: string }[];
   note: string;
 };
+
+export type PreflightStatus = "pass" | "warn" | "fail";
+
+export type PreflightCheck = {
+  key: string;
+  label: string;
+  status: PreflightStatus;
+  scope: "evaluation" | "scoring" | "both";
+  detail: string;
+  hint: string | null;
+};
+
+export type ColumnMapping = {
+  original: string;
+  normalized: string;
+  canonical: string;
+  mapped: boolean;
+  role: string | null;
+};
+
+export type SplitCoverage = {
+  split: "train" | "validation" | "test";
+  rows: number;
+  benign: number;
+  attack: number;
+};
+
+export type PreflightResult = {
+  source: string;
+  dataset: {
+    rows: number;
+    columns: number;
+    features: number;
+    hash: string;
+  };
+  column_mapping: ColumnMapping[];
+  checks: PreflightCheck[];
+  missing: {
+    cells: number;
+    columns: { column: string; missing: number }[];
+  };
+  non_finite: {
+    cells: number;
+    columns: Record<string, number>;
+  };
+  timestamp: {
+    column: string | null;
+    parse_rate: number | null;
+    invalid: number | null;
+  };
+  labels: {
+    present: boolean;
+    missing?: number;
+    classes: { label: string; count: number; kind: "benign" | "attack" }[];
+    benign?: number;
+    attack?: number;
+  };
+  split: {
+    requested: "temporal" | "random" | "group";
+    effective: "temporal" | "random" | "group";
+    fell_back: boolean;
+    coverage: SplitCoverage[];
+    entity_key: string | null;
+    warnings: string[];
+  } | null;
+  ready_for_evaluation: boolean;
+  ready_for_scoring: boolean;
+  blockers: {
+    evaluation: string[];
+    scoring: string[];
+  };
+};

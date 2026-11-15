@@ -24,6 +24,7 @@ from flowlab.compare import load_comparison
 from flowlab.jobs import JOBS, JobNotCancellable, JobQueueFull
 from flowlab.models.registry import available
 from flowlab.pipeline import load_frame
+from flowlab.preflight import preflight_frame
 from flowlab.service import ExperimentSpec, demo_frame, execute, score_payload
 from flowlab.store import (
     count_runs,
@@ -154,7 +155,12 @@ async def guard_local_api(request: Request, call_next):
                     status_code=403,
                 )
             )
-    if request.url.path in {"/api/upload", "/api/jobs/upload", "/api/jobs/score"}:
+    if request.url.path in {
+        "/api/upload",
+        "/api/jobs/upload",
+        "/api/jobs/score",
+        "/api/preflight",
+    }:
         # multipart 有两份可选文件（数据 + 标签），给协议开销留 1 MB 余量。
         max_body = MAX_UPLOAD_BYTES * 2 + 1024 * 1024
         declared = _content_length(request)
@@ -392,6 +398,58 @@ def job_result(job_id: str):
     if result is None:
         raise HTTPException(404, "结果已写入历史库，请通过 run_id 读取")
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/preflight")
+async def preflight(
+    file: UploadFile = File(...),
+    labels: UploadFile | None = File(None),
+    split: str = Form("temporal"),
+    test_size: float = Form(0.3),
+    validation_size: float = Form(0.2),
+    seed: int = Form(42),
+    allow_pickle: bool = Form(False),
+    pickle_token: str | None = Header(None, alias="X-FlowLab-Pickle-Token"),
+):
+    if split not in {"temporal", "random", "group"}:
+        raise HTTPException(400, "split 只能是 temporal、random 或 group")
+    if not 0.05 <= test_size <= 0.5:
+        raise HTTPException(400, "test_size 应在 0.05~0.5 之间")
+    if not 0.05 <= validation_size <= 0.4:
+        raise HTTPException(400, "validation_size 应在 0.05~0.4 之间")
+    if test_size + validation_size > 0.8:
+        raise HTTPException(400, "test_size + validation_size 不能超过 0.8")
+    if not 0 <= seed <= 2**32 - 1:
+        raise HTTPException(400, "seed 超出允许范围")
+    if allow_pickle:
+        _check_pickle_token(pickle_token)
+    _check_upload_size(file, "数据文件")
+
+    with tempfile.TemporaryDirectory(prefix="flowlab-preflight-") as td:
+        data_path, label_path, name, _ = await _stage_job_files(file, labels, Path(td))
+        try:
+            from flowlab.ingest.pcap import PcapUnavailable
+
+            loaded = await run_in_threadpool(
+                load_frame, data_path, label_path, allow_pickle=allow_pickle
+            )
+            report = await run_in_threadpool(
+                preflight_frame,
+                loaded.df,
+                source=name,
+                raw_columns=loaded.raw_columns,
+                split=split,
+                test_size=test_size,
+                validation_size=validation_size,
+                seed=seed,
+            )
+        except PcapUnavailable as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(400, f"预检失败：{exc}") from exc
+    return JSONResponse(report, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/api/upload")

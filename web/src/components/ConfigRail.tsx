@@ -28,6 +28,8 @@ type Props = {
   scoreModel: string; onScoreModel: (name: string) => void;
   scoreTop: number; onScoreTop: (value: number) => void;
   onScore: () => void;
+  preflightBusy: boolean;
+  onPreflight: () => void;
   busy: boolean; onRun: () => void; error: string | null; notice: string | null;
   job: Job | null;
   cancelBusy: boolean;
@@ -103,6 +105,17 @@ export function ConfigRail(p: Props) {
                 <input type="checkbox" checked={p.allowPickle} onChange={(e) => p.onAllowPickle(e.target.checked)} />
               </label>
             )}
+            <button
+              className="preflight-action"
+              type="button"
+              onClick={p.onPreflight}
+              disabled={!p.file || p.busy || p.preflightBusy}
+            >
+              {p.preflightBusy ? "正在读取并预检…" : "预检数据与切分"}
+            </button>
+            <p className="hint">
+              先检查列映射、标签、时间戳和切分后类别；只读取，不训练。
+            </p>
           </>
         )}
       </section>

@@ -23,6 +23,7 @@ class LoadedFrame:
     label_info: dict = field(default_factory=dict)
     engineering: dict = field(default_factory=describe)
     format_info: dict = field(default_factory=dict)
+    raw_columns: list[str] = field(default_factory=list)
 
     def meta(self) -> dict:
         return {
@@ -38,6 +39,7 @@ def load_frame(
 ) -> LoadedFrame:
     p = Path(path)
     df, fmt = read_any(p, allow_pickle=allow_pickle)
+    raw_columns = [str(column) for column in df.attrs.get("raw_columns", df.columns)]
     df = normalize_columns(df)
 
     info: dict = {}
@@ -55,5 +57,9 @@ def load_frame(
 
     df = add_engineered_features(df)
     return LoadedFrame(
-        df=df, source=f"{p.name}（{fmt.get('format', p.suffix)}）", label_info=info, format_info=fmt
+        df=df,
+        source=f"{p.name}（{fmt.get('format', p.suffix)}）",
+        label_info=info,
+        format_info=fmt,
+        raw_columns=raw_columns,
     )

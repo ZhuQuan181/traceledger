@@ -11,6 +11,7 @@ import {
   fetchJobResult,
   fetchModels,
   loadRun,
+  preflightUpload,
 } from "./api";
 import { num, pct } from "./format";
 import type {
@@ -18,6 +19,7 @@ import type {
   Job,
   ModelInfo,
   Payload,
+  PreflightResult,
   RunRow,
   ScorePayload,
 } from "./types";
@@ -38,6 +40,7 @@ import { DiagnosticCurves } from "./components/DiagnosticCurves";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { RunProgress } from "./components/RunProgress";
 import { ScorePanel } from "./components/ScorePanel";
+import { PreflightPanel } from "./components/PreflightPanel";
 
 const ALL = ["mlp", "iforest", "autoencoder"];
 const JOB_STORAGE_KEY = "flowlab.active-job";
@@ -117,6 +120,8 @@ export default function App() {
   const [scoreModel, setScoreModel] = useState("iforest");
   const [scoreTop, setScoreTop] = useState(20);
   const [scoreResult, setScoreResult] = useState<ScorePayload | null>(null);
+  const [preflight, setPreflight] = useState<PreflightResult | null>(null);
+  const [preflightBusy, setPreflightBusy] = useState(false);
   const [payload, setPayload] = useState<Payload | null>(null);
   const [history, setHistory] = useState<RunRow[]>([]);
   const [job, setJob] = useState<Job | null>(null);
@@ -137,7 +142,7 @@ export default function App() {
   const [compareError, setCompareError] = useState<string | null>(null);
   const requestInFlight = useRef(false);
   const jobActive = Boolean(job && ["queued", "running", "cancelling"].includes(job.status));
-  const busy = jobActive || historyBusy || startingJob;
+  const busy = jobActive || historyBusy || startingJob || preflightBusy;
   const scoreModels = useMemo(
     () => models.filter((model) => model.kind === "unsupervised"),
     [models],
@@ -269,6 +274,10 @@ export default function App() {
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
   }, []);
+
+  useEffect(() => {
+    setPreflight(null);
+  }, [file, labelsFile, split, testSize, validationSize, seed]);
 
   function refreshHistory() {
     fetchHistory().then((items) => {
@@ -539,6 +548,10 @@ export default function App() {
       setError("请先选择数据文件。");
       return;
     }
+    if (source === "file" && preflight && !preflight.ready_for_evaluation) {
+      setError("预检发现会阻断评估的问题；请先处理预检面板中的提示，或改用无标签评分。");
+      return;
+    }
     if (source === "demo" && (normal < 100 || normal > 200_000 || attack < 10 || attack > 50_000)) {
       setError("正常流需在 100–200,000 之间，攻击流需在 10–50,000 之间。");
       return;
@@ -561,6 +574,7 @@ export default function App() {
     setJob(null);
     setJobId(null);
     setScoreResult(null);
+    setPreflight(null);
     window.localStorage.removeItem(JOB_STORAGE_KEY);
     setMobilePanel(null);
     try {
@@ -591,6 +605,10 @@ export default function App() {
       setError("请先选择数据文件。");
       return;
     }
+    if (preflight && !preflight.ready_for_scoring) {
+      setError("预检发现当前文件还不能进入评分；请先处理预检面板中的提示。");
+      return;
+    }
     if (!scoreModel) {
       setError("请选择一个无监督打分模型。");
       return;
@@ -605,6 +623,7 @@ export default function App() {
     setJob(null);
     setJobId(null);
     setScoreResult(null);
+    setPreflight(null);
     window.localStorage.removeItem(JOB_STORAGE_KEY);
     setMobilePanel(null);
     try {
@@ -620,12 +639,52 @@ export default function App() {
     }
   }
 
+  async function inspectFile() {
+    if (requestInFlight.current || jobActive || preflightBusy) return;
+    if (!file) {
+      setError("请先选择数据文件。");
+      return;
+    }
+    requestInFlight.current = true;
+    setPreflightBusy(true);
+    setError(null);
+    setMobilePanel(null);
+    try {
+      const report = await preflightUpload(
+        file,
+        { split, test_size: testSize, validation_size: validationSize, seed },
+        labelsFile,
+        allowPickle,
+      );
+      setPayload(null);
+      setScoreResult(null);
+      setPreflight(report);
+      window.requestAnimationFrame(() => {
+        const panel = document.getElementById("preflight-panel");
+        if (typeof panel?.scrollIntoView === "function") {
+          panel.scrollIntoView({
+            behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+              ? "auto"
+              : "smooth",
+            block: "start",
+          });
+        }
+      });
+    } catch (inspectError) {
+      setError(inspectError instanceof Error ? inspectError.message : String(inspectError));
+    } finally {
+      requestInFlight.current = false;
+      setPreflightBusy(false);
+    }
+  }
+
   async function openRun(id: string) {
     if (requestInFlight.current || jobActive) return;
     requestInFlight.current = true;
     setHistoryBusy(true);
     setError(null);
     setScoreResult(null);
+    setPreflight(null);
     setMobilePanel(null);
     try {
       applyPayload(await loadRun(id), undefined, true);
@@ -669,6 +728,7 @@ export default function App() {
     setFile(next);
     setLabelsFile(null);
     setScoreResult(null);
+    setPreflight(null);
     setAblate("");
     setAblationColumns([]);
     setHistoryNotice(null);
@@ -753,6 +813,7 @@ export default function App() {
             setSource(s);
             setError(null);
             setScoreResult(null);
+            setPreflight(null);
             setFile(null);
             setLabelsFile(null);
             setAllowPickle(false);
@@ -775,6 +836,7 @@ export default function App() {
           scoreModels={scoreModels}
           scoreModel={scoreModel} onScoreModel={setScoreModel}
           scoreTop={scoreTop} onScoreTop={setScoreTop} onScore={runScore}
+          preflightBusy={preflightBusy} onPreflight={inspectFile}
           busy={busy} onRun={() => run()} error={error} notice={historyNotice} stale={stale}
           job={job} cancelBusy={cancelBusy}
           onCancelJob={cancelCurrentJob} onDismissJob={dismissJob}
@@ -800,6 +862,14 @@ export default function App() {
             </aside>
           )}
           {!job && scoreResult && <ScorePanel result={scoreResult} />}
+          {!job && !payload && !scoreResult && preflight && (
+            <PreflightPanel
+              result={preflight}
+              onRun={() => run()}
+              onScore={runScore}
+              onDismiss={() => setPreflight(null)}
+            />
+          )}
           {connectionError && (
             <div className="connection-warning" role="status">
               {connectionError} 请在本机运行 <code>uv run flowlab serve</code>。
@@ -814,7 +884,7 @@ export default function App() {
             </div>
           )}
 
-          {!payload && !busy && !scoreResult && (
+          {!payload && !busy && !scoreResult && !preflight && (
             <section className="intro">
               <div className="intro-copy">
                 <p className="intro-kicker"><span className="live" aria-hidden="true" />本地流量实验室</p>

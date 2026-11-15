@@ -39,7 +39,10 @@ def read_csv(path: str | Path) -> pd.DataFrame:
             )
             # 单列表头（如只有 label 的标注文件）也是合法 CSV
             if df.shape[1] >= 2 or (df.shape[1] == 1 and expected_cols <= 1):
-                return normalize_columns(df)
+                raw_columns = [str(column) for column in df.columns]
+                out = normalize_columns(df)
+                out.attrs["raw_columns"] = raw_columns
+                return out
         except (UnicodeDecodeError, pd.errors.ParserError) as exc:  # pragma: no cover
             last_err = exc
     raise ValueError(f"无法解析 CSV: {p} ({last_err})")

@@ -219,6 +219,40 @@ def test_invalid_ablation_is_a_client_error():
     assert "没有参与训练" in res.json()["detail"]
 
 
+def test_preflight_returns_mapping_and_split_coverage():
+    from flowlab.synthetic import generate
+
+    raw = generate(180, 30, seed=12)
+    res = client.post(
+        "/api/preflight",
+        files={"file": ("flows.csv", raw.to_csv(index=False).encode(), "text/csv")},
+        data={"split": "temporal", "test_size": "0.3", "validation_size": "0.2"},
+    )
+    assert res.status_code == 200
+    report = res.json()
+    assert report["ready_for_evaluation"] is True
+    assert report["labels"]["attack"] == 30
+    assert report["split"]["coverage"][0]["attack"] > 0
+    mapped = {row["original"]: row for row in report["column_mapping"]}
+    assert mapped["Source IP"]["canonical"] == "src_ip"
+    assert res.headers["cache-control"] == "no-store"
+
+
+def test_preflight_allows_scoring_when_upload_has_no_labels():
+    from flowlab.synthetic import generate
+
+    raw = generate(120, 20, seed=13).drop(columns=["Label"])
+    res = client.post(
+        "/api/preflight",
+        files={"file": ("unlabeled.csv", raw.to_csv(index=False).encode(), "text/csv")},
+    )
+    assert res.status_code == 200
+    report = res.json()
+    assert report["ready_for_evaluation"] is False
+    assert report["ready_for_scoring"] is True
+    assert report["labels"]["present"] is False
+
+
 def test_background_job_reports_progress_and_persists_result(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOWLAB_HOME", str(tmp_path))
     created = client.post(

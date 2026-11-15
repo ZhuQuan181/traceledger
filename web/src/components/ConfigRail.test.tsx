@@ -48,6 +48,8 @@ function props() {
     scoreTop: 50,
     onScoreTop: vi.fn(),
     onScore: vi.fn(),
+    preflightBusy: false,
+    onPreflight: vi.fn(),
     busy: false,
     onRun: vi.fn(),
     error: null,

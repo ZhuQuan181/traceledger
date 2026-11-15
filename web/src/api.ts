@@ -4,6 +4,7 @@ import type {
   Job,
   ModelInfo,
   Payload,
+  PreflightResult,
   RunRow,
   RunStatus,
   ScorePayload,
@@ -178,6 +179,33 @@ export async function createUploadJob(
   if (allowPickle) headers["X-FlowLab-Pickle-Token"] = await getPickleToken();
   const res = await fetch("/api/jobs/upload", { method: "POST", body: form, headers });
   return json<Job>(res);
+}
+
+export type PreflightParams = {
+  split: "temporal" | "random" | "group";
+  test_size: number;
+  validation_size: number;
+  seed: number;
+};
+
+export async function preflightUpload(
+  file: File,
+  params: PreflightParams,
+  labels?: File | null,
+  allowPickle = false,
+): Promise<PreflightResult> {
+  const form = new FormData();
+  form.append("file", file);
+  if (labels) form.append("labels", labels);
+  form.append("split", params.split);
+  form.append("test_size", String(params.test_size));
+  form.append("validation_size", String(params.validation_size));
+  form.append("seed", String(params.seed));
+  form.append("allow_pickle", String(allowPickle));
+  const headers: Record<string, string> = {};
+  if (allowPickle) headers["X-FlowLab-Pickle-Token"] = await getPickleToken();
+  const res = await fetch("/api/preflight", { method: "POST", body: form, headers });
+  return json<PreflightResult>(res);
 }
 
 export async function createScoreJob(
