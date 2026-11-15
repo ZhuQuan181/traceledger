@@ -185,11 +185,13 @@ def preflight_frame(
             _check("column_collision", "列名冲突", "pass", "both", "标准化后没有重复列。")
         )
 
-    missing_counts = df[feature_columns].isna().sum() if feature_columns else pd.Series(dtype=int)
-    missing_cells = int(missing_counts.sum())
+    missing_counts = {column: int(df[column].isna().sum()) for column in feature_columns}
+    missing_cells = sum(missing_counts.values())
     missing_columns = [
-        {"column": str(column), "missing": int(count)}
-        for column, count in missing_counts.sort_values(ascending=False).head(8).items()
+        {"column": column, "missing": count}
+        for column, count in sorted(missing_counts.items(), key=lambda item: item[1], reverse=True)[
+            :8
+        ]
         if count
     ]
     if not feature_columns:

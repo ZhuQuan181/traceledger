@@ -46,6 +46,7 @@ uv run flowlab serve                       # Web workbench at 127.0.0.1:8765
 
 uv run python scripts/check_dataset.py data.csv        # Pre-training data check
 uv run python scripts/bench_scale.py --rows 690000     # Scale benchmark
+uv run python scripts/bench_store.py --runs 200        # History compression/query benchmark
 cd web && npm ci && npm run build          # Rebuild the frontend
 ```
 

@@ -268,8 +268,6 @@ def score_frame(
     scores = detector.score(X)
     _notify(progress, "model", 1, 1)
     _check_cancel(cancel)
-    view = df.copy()
-    view["score"] = scores
     cols = [
         c
         for c in (
@@ -287,22 +285,19 @@ def score_frame(
             "bytes_per_s",
             "packets_per_s",
         )
-        if c in view.columns
+        if c in df.columns
     ]
-    rows = (
-        view.sort_values("score", ascending=False)
-        .assign(
-            **{column: view[column].map(_score_value) for column in cols if column != "timestamp"}
-        )
-        .head(top)[cols + ["score"]]
-        .to_dict("records")
-    )
+    view = df[cols].copy()
+    view["score"] = scores
+    rows = view.sort_values("score", ascending=False).head(top)[cols + ["score"]]
+    for column in cols:
+        rows[column] = rows[column].map(_score_value)
     return [
         {
-            **{key: _score_value(value) for key, value in row.items()},
+            **{key: _score_value(value) for key, value in row.items() if key != "score"},
             "score": round(float(row["score"]), 4),
         }
-        for row in rows
+        for _, row in rows.iterrows()
     ]
 
 

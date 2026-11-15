@@ -212,14 +212,15 @@ false_negatives / source_ranking`。
 5. ✅ 评分与评估语义分离：不读取标签、不计算 AUC/F1，分数不宣称为概率。
 6. ✅ 上传预检：列映射、特征质量、时间戳、标签覆盖与切分后类别数量；
    阻断项与注意事项分开呈现。
+7. ✅ 历史 payload zlib 压缩、SQLite WAL/索引、单次历史页查询和 GZip 响应。
+8. ✅ CSV 读入与评分路径去除不必要的整表复制，并补充读入内存基准。
 
 ## 十二、剩余债务
 
-1. **历史存储体积**：`store.py` 存整份 payload，报告越长数据库越大；后续应拆出报告正文或做压缩/清理策略。
-2. **统计可信度**：尚未提供 bootstrap 置信区间、模型差值区间或时间块交叉验证。
-3. **特征贡献**：尚未接入 permutation importance / SHAP，报告无法给出原始列级贡献。
-4. **前端结构**：`styles.css` 仍是单文件，组件继续增加后应拆分为 tokens/layout/components。
-5. **远程模式**：没有内置鉴权；`--allow-remote` 只表示用户确认风险，不提供访问控制。
-6. **基准复现**：公开数据集与 pcap 端到端仍未进入固定 CI；`tshark` 路径目前以跳过为主。
+1. **统计可信度**：尚未提供 bootstrap 置信区间、模型差值区间或时间块交叉验证。
+2. **特征贡献**：尚未接入 permutation importance / SHAP，报告无法给出原始列级贡献。
+3. **前端结构**：`styles.css` 仍是单文件，组件继续增加后应拆分为 tokens/layout/components。
+4. **远程模式**：没有内置鉴权；`--allow-remote` 只表示用户确认风险，不提供访问控制。
+5. **基准复现**：公开数据集与 pcap 端到端仍未进入固定 CI；`tshark` 路径目前以跳过为主。
 
 下一步的优先级和验收标准见 [`OPTIMIZATION-ROADMAP.md`](OPTIMIZATION-ROADMAP.md)。

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import time
+import tracemalloc
 from pathlib import Path
 
 from flowlab.engineer import add_engineered_features
@@ -41,8 +42,13 @@ def main() -> None:
     timed("写 CSV", lambda: raw.to_csv(csv_path, index=False))
     size_mb = csv_path.stat().st_size / 2**20
 
+    tracemalloc.start()
     df, t_read = timed("读 CSV + 列名标准化", lambda: read_csv(csv_path))
+    _, read_peak = tracemalloc.get_traced_memory()
+    tracemalloc.reset_peak()
     df, t_feat = timed("特征工程", lambda: add_engineered_features(df))
+    _, feat_peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
 
     results, warns = timed(
         f"跑模型 {a.models}",
@@ -55,6 +61,8 @@ def main() -> None:
     print(f"文件大小            {size_mb:8.1f} MB")
     print(f"列数                {df.shape[1]:8d}")
     print(f"内存峰值(近似)      {df.memory_usage(deep=False).sum() / 2**20:8.1f} MB")
+    print(f"读入峰值            {read_peak / 2**20:8.1f} MB")
+    print(f"特征工程峰值        {feat_peak / 2**20:8.1f} MB")
     print()
     for r in results:
         m = r.metrics

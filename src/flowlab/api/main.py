@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.gzip import GZipMiddleware
 
 from flowlab import __version__
 from flowlab.compare import load_comparison
@@ -27,17 +28,15 @@ from flowlab.pipeline import load_frame
 from flowlab.preflight import preflight_frame
 from flowlab.service import ExperimentSpec, demo_frame, execute, score_payload
 from flowlab.store import (
-    count_runs,
     delete_run,
     get_run,
-    history_models,
-    list_runs,
+    history_page,
     save_run,
-    stats,
     update_run,
 )
 
 app = FastAPI(title="FlowLab", version=__version__)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 PICKLE_TOKEN = secrets.token_urlsafe(32)
 MAX_UPLOAD_BYTES = int(os.getenv("FLOWLAB_MAX_UPLOAD_MB", "1024")) * 1024 * 1024
@@ -751,13 +750,7 @@ def history(
     model: str | None = Query(None, max_length=80),
     status: Literal["unreviewed", "baseline", "failed", "archived"] | None = None,
 ):
-    return {
-        "runs": list_runs(limit, offset, q, model, status),
-        "total": count_runs(q, model, status),
-        "available": count_runs(),
-        "db_bytes": stats()["db_bytes"],
-        "models": history_models(),
-    }
+    return history_page(limit, offset, q, model, status)
 
 
 @app.patch("/api/history/{run_id}")

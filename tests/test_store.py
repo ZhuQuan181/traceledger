@@ -124,7 +124,11 @@ def test_history_search_filters_notes_status_and_capacity(tmp_path, monkeypatch)
     assert [row["id"] for row in store.list_runs(status="baseline")] == [first_id]
     assert store.count_runs(status="baseline") == 1
     assert set(store.history_models()) >= {"overfit", "stable"}
-    assert store.stats() == {"count": 2, "db_bytes": (tmp_path / "flowlab.db").stat().st_size}
+    capacity = store.stats()
+    assert capacity["count"] == 2
+    assert capacity["db_bytes"] >= (tmp_path / "flowlab.db").stat().st_size
+    assert capacity["payload_bytes"] < capacity["payload_raw_bytes"]
+    assert capacity["wal_bytes"] > 0
 
 
 def test_history_rejects_unknown_status(tmp_path, monkeypatch):
@@ -136,3 +140,49 @@ def test_history_rejects_unknown_status(tmp_path, monkeypatch):
         assert "status" in str(exc)
     else:
         raise AssertionError("unknown status should be rejected")
+
+
+def test_payload_is_compressed_and_decoded_transparently(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLOWLAB_HOME", str(tmp_path))
+    run_id = store.save_run(_payload())
+
+    with sqlite3.connect(tmp_path / "flowlab.db") as conn:
+        row = conn.execute(
+            "SELECT typeof(payload), length(payload), payload_codec, "
+            "payload_raw_bytes, schema_version FROM runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(runs)")}
+
+    assert row[0] == "blob"
+    assert row[1] < row[3]
+    assert row[2] == store.PAYLOAD_CODEC
+    assert row[4] == store.SCHEMA_VERSION
+    assert journal_mode == "wal"
+    assert {
+        "idx_runs_created",
+        "idx_runs_status_created",
+        "idx_runs_dataset_hash",
+        "idx_runs_best_model",
+        "idx_runs_fingerprint",
+    } <= indexes
+    assert store.get_run(run_id)["payload"]["dataset"]["hash"] == "abc123"
+
+
+def test_history_page_returns_counts_capacity_and_models_in_one_call(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLOWLAB_HOME", str(tmp_path))
+    first = _payload()
+    first["dataset"]["source"] = "alpha.csv"
+    second = deepcopy(first)
+    second["dataset"]["source"] = "beta.csv"
+    store.save_run(first)
+    store.save_run(second)
+
+    page = store.history_page(limit=1, query="beta.csv")
+    assert len(page["runs"]) == 1
+    assert page["runs"][0]["source"] == "beta.csv"
+    assert page["total"] == 1
+    assert page["available"] == 2
+    assert page["payload_bytes"] < page["payload_raw_bytes"]
+    assert set(page["models"]) == {"overfit", "stable"}

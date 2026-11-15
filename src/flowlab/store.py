@@ -9,11 +9,13 @@ import json
 import os
 import sqlite3
 import uuid
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 STATUSES = ("unreviewed", "baseline", "failed", "archived")
+PAYLOAD_CODEC = "zlib-json-v1"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
   id            TEXT PRIMARY KEY,
@@ -39,9 +41,18 @@ CREATE TABLE IF NOT EXISTS runs (
   note          TEXT NOT NULL DEFAULT '',
   status        TEXT NOT NULL DEFAULT 'unreviewed',
   updated_at    TEXT,
+  payload_codec TEXT NOT NULL DEFAULT 'json',
+  payload_raw_bytes INTEGER,
   payload       TEXT NOT NULL
 );
+"""
+
+INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_runs_created ON runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_status_created ON runs(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_dataset_hash ON runs(dataset_hash);
+CREATE INDEX IF NOT EXISTS idx_runs_best_model ON runs(best_model);
+CREATE INDEX IF NOT EXISTS idx_runs_fingerprint ON runs(fingerprint);
 """
 
 MIGRATION_COLUMNS = {
@@ -54,7 +65,11 @@ MIGRATION_COLUMNS = {
     "note": "TEXT NOT NULL DEFAULT ''",
     "status": "TEXT NOT NULL DEFAULT 'unreviewed'",
     "updated_at": "TEXT",
+    "payload_codec": "TEXT NOT NULL DEFAULT 'json'",
+    "payload_raw_bytes": "INTEGER",
 }
+
+_models_cache: tuple[tuple[str, int, int], list[str]] | None = None
 
 
 def db_path() -> Path:
@@ -64,13 +79,21 @@ def db_path() -> Path:
 
 
 def connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path())
+    conn = sqlite3.connect(db_path(), timeout=5.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA temp_store = MEMORY")
+    conn.execute("PRAGMA cache_size = -20000")
+    conn.execute("PRAGMA wal_autocheckpoint = 256")
+    conn.execute("PRAGMA journal_size_limit = 1048576")
     conn.executescript(SCHEMA)
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
     for name, definition in MIGRATION_COLUMNS.items():
         if name not in columns:
             conn.execute(f"ALTER TABLE runs ADD COLUMN {name} {definition}")
+    conn.executescript(INDEXES)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     return conn
 
@@ -88,14 +111,17 @@ def save_run(payload: dict) -> str:
     ds = payload.get("dataset") or {}
     rid = uuid.uuid4().hex[:10]
     now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    raw_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    stored_payload = zlib.compress(raw_payload, level=6)
     with connect() as conn:
         conn.execute(
             """INSERT INTO runs (
               id, schema_version, created_at, source, dataset_hash, split, seed,
               threshold, rows, train, validation, test, attack_train,
               attack_validation, attack_test, best_model, best_auc,
-              best_validation_auc, models, fingerprint, note, status, updated_at, payload
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+              best_validation_auc, models, fingerprint, note, status, updated_at,
+              payload_codec, payload_raw_bytes, payload
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 rid,
                 SCHEMA_VERSION,
@@ -123,7 +149,9 @@ def save_run(payload: dict) -> str:
                 "",
                 "unreviewed",
                 now,
-                json.dumps(payload, ensure_ascii=False),
+                PAYLOAD_CODEC,
+                len(raw_payload),
+                stored_payload,
             ),
         )
     return rid
@@ -188,9 +216,7 @@ def count_runs(query: str = "", model: str | None = None, status: str | None = N
         return int(conn.execute(f"SELECT COUNT(*) FROM runs {where}", params).fetchone()[0])
 
 
-def history_models() -> list[str]:
-    with connect() as conn:
-        rows = conn.execute("SELECT models FROM runs WHERE models IS NOT NULL").fetchall()
+def _parse_models(rows: list[sqlite3.Row]) -> list[str]:
     names: set[str] = set()
     for row in rows:
         try:
@@ -200,11 +226,86 @@ def history_models() -> list[str]:
     return sorted(names)
 
 
+def history_models() -> list[str]:
+    global _models_cache
+    path = db_path()
+    with connect() as conn:
+        stat = path.stat()
+        key = (str(path), stat.st_mtime_ns, stat.st_size)
+        if _models_cache is not None and _models_cache[0] == key:
+            return list(_models_cache[1])
+        rows = conn.execute("SELECT models FROM runs WHERE models IS NOT NULL").fetchall()
+    result = _parse_models(rows)
+    _models_cache = (key, result)
+    return list(result)
+
+
 def stats() -> dict:
     path = db_path()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS count, "
+            "COALESCE(SUM(LENGTH(payload)), 0) AS payload_bytes, "
+            "COALESCE(SUM(COALESCE(payload_raw_bytes, LENGTH(payload))), 0) AS payload_raw_bytes "
+            "FROM runs"
+        ).fetchone()
+    wal_path = path.with_name(path.name + "-wal")
+    file_bytes = path.stat().st_size if path.exists() else 0
+    wal_bytes = wal_path.stat().st_size if wal_path.exists() else 0
     return {
-        "count": count(),
-        "db_bytes": path.stat().st_size if path.exists() else 0,
+        "count": int(row["count"]),
+        "db_bytes": file_bytes + wal_bytes,
+        "wal_bytes": wal_bytes,
+        "payload_bytes": int(row["payload_bytes"]),
+        "payload_raw_bytes": int(row["payload_raw_bytes"]),
+    }
+
+
+def history_page(
+    limit: int = 20,
+    offset: int = 0,
+    query: str = "",
+    model: str | None = None,
+    status: str | None = None,
+) -> dict:
+    """一次连接返回历史列表、计数和容量摘要，避免同一页面重复扫描数据库。"""
+    conditions, params = _history_filters(query, model, status)
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id,schema_version,created_at,source,dataset_hash,split,rows,"
+            "validation,test,threshold,best_model,best_auc,best_validation_auc,"
+            "models,fingerprint,note,status,updated_at "
+            f"FROM runs {where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        ).fetchall()
+        total = int(conn.execute(f"SELECT COUNT(*) FROM runs {where}", params).fetchone()[0])
+        available = int(conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0])
+        payload_row = conn.execute(
+            "SELECT COALESCE(SUM(LENGTH(payload)), 0) AS stored, "
+            "COALESCE(SUM(COALESCE(payload_raw_bytes, LENGTH(payload))), 0) AS raw "
+            "FROM runs"
+        ).fetchone()
+        model_rows = conn.execute("SELECT models FROM runs WHERE models IS NOT NULL").fetchall()
+    runs = []
+    for row in rows:
+        item = dict(row)
+        item["models"] = json.loads(item["models"]) if item.get("models") else []
+        runs.append(item)
+    db = db_path()
+    wal = db.with_name(db.name + "-wal")
+    db_bytes = (db.stat().st_size if db.exists() else 0) + (
+        wal.stat().st_size if wal.exists() else 0
+    )
+    return {
+        "runs": runs,
+        "total": total,
+        "available": available,
+        "db_bytes": db_bytes,
+        "wal_bytes": wal.stat().st_size if wal.exists() else 0,
+        "payload_bytes": int(payload_row["stored"]),
+        "payload_raw_bytes": int(payload_row["raw"]),
+        "models": _parse_models(model_rows),
     }
 
 
@@ -214,7 +315,12 @@ def get_run(run_id: str) -> dict | None:
     if row is None:
         return None
     out = dict(row)
-    out["payload"] = json.loads(out["payload"])
+    stored = out["payload"]
+    if isinstance(stored, bytes):
+        raw = zlib.decompress(stored)
+    else:
+        raw = str(stored).encode("utf-8")
+    out["payload"] = json.loads(raw)
     return out
 
 
@@ -277,4 +383,8 @@ def prune(keep: int = 50) -> int:
         ids = [(r["id"],) for r in rows]
         if ids:
             conn.executemany("DELETE FROM runs WHERE id = ?", ids)
+    if ids:
+        with sqlite3.connect(db_path()) as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.execute("VACUUM")
     return len(ids)

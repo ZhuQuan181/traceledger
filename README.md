@@ -45,6 +45,7 @@ uv run flowlab serve                       # Web 界面 127.0.0.1:8765
 
 uv run python scripts/check_dataset.py data.csv        # 训练前体检：类别/缺失/inf/重复
 uv run python scripts/bench_scale.py --rows 690000     # 规模基准（解析/特征/训练耗时）
+uv run python scripts/bench_store.py --runs 200        # 历史库压缩/查询基准
 cd web && npm ci && npm run build          # 改前端后重新构建
 ```
 

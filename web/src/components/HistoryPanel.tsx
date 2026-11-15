@@ -240,7 +240,16 @@ export function HistoryPanel({
         <div className="history-capacity">
           <span>本机共 <strong>{page.available.toLocaleString()}</strong> 次实验</span>
           <span>当前筛选 <strong>{page.total.toLocaleString()}</strong> 次</span>
-          <span>数据库 <strong>{formatBytes(page.db_bytes)}</strong></span>
+          <span>
+            数据库 <strong>{formatBytes(page.db_bytes)}</strong>
+            {page.wal_bytes ? ` · WAL ${formatBytes(page.wal_bytes)}` : ""}
+          </span>
+          {page.payload_raw_bytes != null && page.payload_bytes != null && (
+            <span>
+              报告正文 <strong>{formatBytes(page.payload_raw_bytes)}</strong>
+              {" → "}<strong>{formatBytes(page.payload_bytes)}</strong>
+            </span>
+          )}
         </div>
 
         <div className="history-filters">

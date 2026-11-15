@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import io
 from pathlib import Path
 
 import pandas as pd
@@ -25,8 +24,8 @@ def read_csv(path: str | Path) -> pd.DataFrame:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"文件不存在: {p}")
-    raw = p.read_bytes()
-    sample = raw[:65536].decode("utf-8", errors="ignore")
+    with p.open("rb") as handle:
+        sample = handle.read(65536).decode("utf-8", errors="ignore")
     sep = sniff_delimiter(sample)
     header = sample.splitlines()[0] if sample.splitlines() else ""
     expected_cols = header.count(sep) + 1
@@ -34,9 +33,7 @@ def read_csv(path: str | Path) -> pd.DataFrame:
     last_err: Exception | None = None
     for enc in _ENCODINGS:
         try:
-            df = pd.read_csv(
-                io.BytesIO(raw), sep=sep, encoding=enc, skipinitialspace=True, low_memory=False
-            )
+            df = pd.read_csv(p, sep=sep, encoding=enc, skipinitialspace=True, low_memory=False)
             # 单列表头（如只有 label 的标注文件）也是合法 CSV
             if df.shape[1] >= 2 or (df.shape[1] == 1 and expected_cols <= 1):
                 raw_columns = [str(column) for column in df.columns]

@@ -245,6 +245,9 @@ export type HistoryPage = {
   total: number;
   available: number;
   db_bytes: number;
+  wal_bytes?: number;
+  payload_bytes?: number;
+  payload_raw_bytes?: number;
   models: string[];
 };
 

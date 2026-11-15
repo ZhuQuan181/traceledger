@@ -136,6 +136,28 @@ def test_history_supports_search_filters_and_annotation(monkeypatch, tmp_path):
     assert client.get("/api/history?q=baseline").json()["total"] == 1
 
 
+def test_large_history_response_uses_gzip(monkeypatch, tmp_path):
+    from flowlab.store import save_run
+
+    monkeypatch.setenv("FLOWLAB_HOME", str(tmp_path))
+    run_id = save_run(
+        {
+            "dataset": {"source": "large.csv", "hash": "large"},
+            "best_model": None,
+            "results": [],
+            "report_md": "diagnostic detail\n" * 4000,
+            "report_html": "<html><body>" + "<p>diagnostic detail</p>" * 1000 + "</body></html>",
+        }
+    )
+    res = client.get(
+        f"/api/history/{run_id}",
+        headers={"Accept-Encoding": "gzip"},
+    )
+    assert res.status_code == 200
+    assert res.headers["content-encoding"] == "gzip"
+    assert res.json()["dataset"]["source"] == "large.csv"
+
+
 def test_history_annotation_rejects_empty_patch(monkeypatch, tmp_path):
     from flowlab.store import save_run
 
